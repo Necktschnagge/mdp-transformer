@@ -16,5 +16,16 @@ if(LINUX)
 	)
 endif()
 
+#message("Custom Message:   " ${Boost_LIBRARIES})
+if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+	TARGET_LINK_LIBRARIES(${PROJECT_NAME} LINK_PUBLIC ${Boost_LIBRARIES} tbb)
+	message("ON GCC")
+else()
+	TARGET_LINK_LIBRARIES(${PROJECT_NAME} LINK_PUBLIC ${Boost_LIBRARIES})
+	message("NOT ON GCC")
+endif()
+#TARGET_LINK_LIBRARIES(${PROJECT_NAME}_lib LINK_PUBLIC ${Boost_LIBRARIES} )
+
 
 ############### Libraries for target ${PROJECT_NAME}_lib ###############
+
