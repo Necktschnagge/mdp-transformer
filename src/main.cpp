@@ -438,6 +438,180 @@ nlohmann::json mdp_to_json(const mdp& m) {
 	return j;
 }
 
+
+template <class _Corpus>
+class Mat {
+public:
+	using area = std::vector<std::vector<_Corpus>>;
+	area m;
+
+	Mat(std::size_t m, std::size_t n) : m(area(std::vector<_Corpus>(_Corpus(0), n), m)) {
+	}
+};
+
+template<class _Corpus>
+Mat<_Corpus> enhanced_solve_linear_system(Mat<_Corpus> A, Mat<_Corpus> b, Mat<bool> target) {
+	/*
+	Ax = b
+	A: m x n
+	b: n x 1
+	x: m x 1
+	ready: m x 1
+	*/
+
+	// check:
+	A.area.size() != 0;
+	A.area[0].size() == b.area.size();
+	ready.area.size() == A.area.size();
+
+	Mat<bool> ready = target;
+
+}
+
+template <class _Corpus>
+Mat<_Corpus> alternate_solve_kinear_system() {
+	std::vector<std::vector<std::pair<std::size_t, rational_type>>> P_table; // must be sorted.
+	std::vector<rational_type> rew_vector;
+
+	std::vector<std::size_t> unresolved; // they have an external order. it should be kept.
+	std::vector<std::size_t> resolved; // is not required to be ordered.
+	std::vector<std::size_t> done; // not sorted
+	std::vector<std::size_t> move_from_unresolved_to_resolved; // for lines that just became resolved
+
+	// node s   |->   {(s1', r1) (s2',r2) (s3',r3), (self,-1)} "=  r_alpha"
+
+alternate_solve_kinear_system___rerun:
+	// apply resolved lines to all unresolved lines:
+	for (const auto& resolved_id : resolved) {
+		for (const auto& unresolved_line : unresolved) {
+			auto found = std::lower_bound(
+				P_table[unresolved_line].cbegin(),
+				P_table[unresolved_line].cend(),
+				resolved_id, [](
+					const std::pair<std::size_t, rational_type>& l,
+					const std::pair<std::size_t, rational_type>& r) {
+						return l.first < r.first;
+				});
+			if (found != P_table[unresolved_line].cend()) {
+				rew_vector[unresolved_line] -= rew_vector[resolved_id] * found->second;
+				P_table[unresolved_line].erase(found);
+				if (P_table[unresolved_line].size() < 2) {
+					// the line is resolved;
+					move_from_unresolved_to_resolved.push_back(unresolved_line);
+				}
+			}
+		}
+	}
+
+	if (!move_from_unresolved_to_resolved.empty()) {
+
+		// normalize the new resolved lines
+		for (const auto& movee : move_from_unresolved_to_resolved) {
+			// check: 
+			if (P_table[movee][1].first != movee) {
+				throw 0;
+			}
+			rew_vector[movee] /= P_table[movee][1].second; // #### ipossibly a zero... (only if broken)
+			P_table[movee][1].second = rational_type(1);
+		}
+
+		// remove from unresolved, put into resolved:
+		std::copy(resolved.cbegin(), resolved.cend(), std::back_inserter(done));
+		resolved = std::move(move_from_unresolved_to_resolved);
+		std::sort(resolved.begin(), resolved.end());
+		auto new_end = std::copy_if(
+			unresolved.cbegin(),
+			unresolved.cend(),
+			unresolved.begin(),
+			[&resolved](const std::size_t& val) -> bool {
+				return /* val not in resolved */ std::lower_bound(resolved.cbegin(), resolved.cend(), val) == resolved.cend();
+			});
+		unresolved.erase(new_end, unresolved.cend());
+
+		goto alternate_solve_kinear_system___rerun;
+	}
+	resolved.clear();
+
+	if (!unresolved.empty()) {
+		const std::size_t high_prio_select{ unresolved.back() };
+		std::vector<std::size_t> resolve_stack;
+
+		while (true) // while true do some operations that leave matrix in some more resolved but consistent state until jumop outside bvecause of somr resolved line
+		{
+
+			// check high_prio_select for already being resolved...
+			if (P_table[high_prio_select].size() < 2) {
+				// high_prio_select already resolved!
+
+				// normalize the resolved line:
+				rew_vector[high_prio_select] /= P_table[high_prio_select][0].second;
+				P_table[high_prio_select][0].second = 1;
+
+				// move resolved line into resolved...
+				unresolved.erase(unresolved.cend() - 1);
+				resolved.push_back(high_prio_select);
+				goto alternate_solve_kinear_system___rerun;
+			}
+
+			// select a line that high_prio_select depends on...
+			const std::size_t select_next_dependent_line{
+				[&]() {
+					for (auto iter = P_table[high_prio_select].cbegin(); iter != P_table[high_prio_select].cend(); ++iter) {
+						if (iter->first == high_prio_select) {
+							continue; // found diagonal entry
+						}
+						if (iter->second == rational_type(0)) {
+							P_table[high_prio_select].erase(iter); // invalidates iterators!!!!
+							continue;
+						}
+						return iter->first;
+					}
+				}()
+			};
+
+			for (const auto& line : resolve_stack) {
+				// if line is a variable in select_next_dependent_line
+					// then resolve select_next_dependent_line usign a#############
+
+				// check if select_next_dependent_line got resolved -> rerun #############################
+			}
+			
+			// resolve high_prio_select using select_next_dependent_line
+
+			resolve_stack.push_back(select_next_dependent_line);
+		}
+
+		// look for dependet line -> a---------------
+		// apply all lines in resolve_stack front to back into a
+		// check if a is resolved -> then break and goto rerun!
+		// 
+		// resolve_stack.push_back(a);
+		// resolve a in high_prio_select
+		// check high_prio_select resolved? -> goto rerun! ------> comes at begin of new loop run...
+		// goto look for next dependet
+
+	}
+
+
+	move s into done(= solved and applied into all other equations...)
+		if not yet(not resolved empty) {
+			solve the highest prio line using only lines which are dependet.
+		}
+
+	for (s in targets + already solved) {
+		for (for t in not- yet - solved) {
+			resolve s in the line of t.
+				if t resolved - move t to resolved ones.
+		}
+		move s into done(= solved and applied into all other equations...)
+	}
+	if not yet(not resolved empty) {
+		solve the highest prio line using only lines which are dependet.
+	}
+
+
+}
+
 int main(int argc, char* argv[])
 {
 	init_logger();
