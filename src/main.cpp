@@ -468,6 +468,31 @@ Mat<_Corpus> enhanced_solve_linear_system(Mat<_Corpus> A, Mat<_Corpus> b, Mat<bo
 
 }
 
+inline void inline_move_resolved_line(
+	std::vector<std::size_t>& unresolved,
+	std::vector<std::size_t>& resolved,
+	std::vector<std::size_t>::const_iterator iterator_inside_vector_unresolved,
+	std::size_t var_eq_id = *iter
+) {
+		// move resolved line into resolved...
+		unresolved.erase(iterator_inside_vector_unresolved);
+		resolved.push_back(var_eq_id);
+	}
+};
+
+inline void inline_move_resolved_line(
+	std::vector<std::size_t>& unresolved,
+	std::vector<std::size_t>& resolved,
+	std::size_t var_eq_id
+) {
+	// move resolved line into resolved...
+	auto iterator_inside_vector_unresolved = std::find(unresolved.cbegin(), unresolved.cend(), var_eq_id);//### check this whole line! 
+	// unresolved darf nicht sorted sein, check for find complies with unsorted container best##########
+	unresolved.erase(iterator_inside_vector_unresolved); // what in case of end iterator! throw an error!
+	resolved.push_back(var_eq_id);
+}
+
+
 template <class _Corpus>
 Mat<_Corpus> alternate_solve_kinear_system() {
 	std::vector<std::vector<std::pair<std::size_t, rational_type>>> P_table; // must be sorted.
@@ -478,6 +503,33 @@ Mat<_Corpus> alternate_solve_kinear_system() {
 	std::vector<std::size_t> done; // not sorted
 	std::vector<std::size_t> move_from_unresolved_to_resolved; // for lines that just became resolved
 
+	static const auto compare_entry_pair{
+		[](
+			const std::pair<std::size_t, rational_type>& l,
+			const std::pair<std::size_t, rational_type>& r
+		) -> bool {
+			return l.first < r.first;
+		}
+	};
+
+	static const auto normalize_resolved_line{
+		[&](std::size_t id_resolved) {
+			// normalize the resolved line:
+			//### check resolved line has zero entries.. .empty()
+			//### check resolved line has entry, but it is zero.
+			// then throw anbiguous error
+			rew_vector[id_resolved] /= P_table[id_resolved][0].second;
+			P_table[id_resolved][0].second = 1;
+		}
+	};
+	static const auto move_resolved_line{
+		[&](std::vector<std::size_t>::const_iterator iterator_inside_vector_unresolved, std::size_t var_eq_id = *iter) {
+			// move resolved line into resolved...
+			unresolved.erase(iterator_inside_vector_unresolved);
+			resolved.push_back(var_eq_id);
+		}
+	};
+
 	// node s   |->   {(s1', r1) (s2',r2) (s3',r3), (self,-1)} "=  r_alpha"
 
 alternate_solve_kinear_system___rerun:
@@ -487,11 +539,8 @@ alternate_solve_kinear_system___rerun:
 			auto found = std::lower_bound(
 				P_table[unresolved_line].cbegin(),
 				P_table[unresolved_line].cend(),
-				resolved_id, [](
-					const std::pair<std::size_t, rational_type>& l,
-					const std::pair<std::size_t, rational_type>& r) {
-						return l.first < r.first;
-				});
+				resolved_id,
+				compare_entry_pair);
 			if (found != P_table[unresolved_line].cend()) {
 				rew_vector[unresolved_line] -= rew_vector[resolved_id] * found->second;
 				P_table[unresolved_line].erase(found);
@@ -511,7 +560,8 @@ alternate_solve_kinear_system___rerun:
 			if (P_table[movee][1].first != movee) {
 				throw 0;
 			}
-			rew_vector[movee] /= P_table[movee][1].second; // #### ipossibly a zero... (only if broken)
+			// use normalize_resolved_line!!!#######
+			rew_vector[movee] /= P_table[movee][1].second; // #### impossibly a zero... (only if broken)
 			P_table[movee][1].second = rational_type(1);
 		}
 
@@ -524,7 +574,8 @@ alternate_solve_kinear_system___rerun:
 			unresolved.cend(),
 			unresolved.begin(),
 			[&resolved](const std::size_t& val) -> bool {
-				return /* val not in resolved */ std::lower_bound(resolved.cbegin(), resolved.cend(), val) == resolved.cend();
+				const auto x{ std::lower_bound(resolved.cbegin(), resolved.cend(), val) };
+				return /* val not in resolved */  !(x != resolved.cend() && (*x == val)); // is this extra == needed for cheking if value is present?
 			});
 		unresolved.erase(new_end, unresolved.cend());
 
@@ -532,18 +583,45 @@ alternate_solve_kinear_system___rerun:
 	}
 	resolved.clear();
 
-	if (!unresolved.empty()) {
+	/*
+		Here we do not have any resolved equations ($a_{m,n} * x_i = r_i$) anymore that we can apply to the unresolved equations.
+		All coefficients of resolved variables in unresolved equations are zero.
+		The corresponding pairs in the sparse matrix are erased.
+	*/
+	if (!unresolved.empty()) { // else we are done
+		/*
+			Based on an ordering of the variables, we choose the one where we most likely expect
+			that we can resolve this variable by only using a few equations of the whole system.
+		*/
 		const std::size_t high_prio_select{ unresolved.back() };
+
+		/*
+			We will attempt to resolve the variable "high_prio_select".
+			In order to achieve this goal, we will select other variables' equations one by one
+			to be able to get rid of non-zero coefficients inside the equation of "high_prio_select".
+			We try to choose as few as needed to resolve "high_prio_select".
+			We depend on these equtions for solving so we call them "dependents".
+			However if once we see that we suddenly resolved a different variable we will stop
+			resolving "high_prio_select" and jump to the beginning of our strategy.
+			Stop resolving "high_prio_select" does not mean that have have done some work without effect.
+			Next time we enter this section we will per design select the same "high_prio_select" again until it becomes resolved.
+
+			The dependent equations, to be more precise say >their id< will be push_back()ed into the resolve_stack:
+		*/
 		std::vector<std::size_t> resolve_stack;
+		/*
+			However each time we push a new equation to the resolve_stack,
+			it must have been reduced by all the previous elements of resolve_stack.
+		*/
 
-		while (true) // while true do some operations that leave matrix in some more resolved but consistent state until jumop outside bvecause of somr resolved line
+		while (true) // while true do some operations on the equations until finally jumping out.
 		{
-
 			// check high_prio_select for already being resolved...
 			if (P_table[high_prio_select].size() < 2) {
 				// high_prio_select already resolved!
 
 				// normalize the resolved line:
+				normalize_resolved_line()
 				rew_vector[high_prio_select] /= P_table[high_prio_select][0].second;
 				P_table[high_prio_select][0].second = 1;
 
@@ -554,7 +632,7 @@ alternate_solve_kinear_system___rerun:
 			}
 
 			// select a line that high_prio_select depends on...
-			const std::size_t select_next_dependent_line{
+			const decltype(P_table[high_prio_select])::const_iterator select_next_dependent_line_it{ // we don't need that iterator.
 				[&]() {
 					for (auto iter = P_table[high_prio_select].cbegin(); iter != P_table[high_prio_select].cend(); ++iter) {
 						if (iter->first == high_prio_select) {
@@ -564,18 +642,52 @@ alternate_solve_kinear_system___rerun:
 							P_table[high_prio_select].erase(iter); // invalidates iterators!!!!
 							continue;
 						}
-						return iter->first;
+						return iter;
 					}
 				}()
 			};
+			const std::size_t select_next_dependent_line{ iter->first };
 
-			for (const auto& line : resolve_stack) {
+			for (const auto& stack_line : resolve_stack) {
+				std::sort(
+					P_table[select_next_dependent_line].begin(),
+					P_table[select_next_dependent_line].end(),
+					compare_entry_pair;
+				);
+				std::sort(
+					P_table[stack_line].begin(),
+					P_table[stack_line].end(),
+					compare_entry_pair
+				); // question: optimization: can we sort it when it is pushed into resolve_stack and keep it sorted?
+			alternate_solve_kinear_system___repeat_apply_previous_stack_line:
+				auto iter = std::lower_bound(
+					P_table[select_next_dependent_line].begin(),
+					P_table[select_next_dependent_line].end(),
+					stack_line,
+					compare_entry_pair);
 				// if line is a variable in select_next_dependent_line
+				if (iter != P_table[select_next_dependent_line].end() && iter->first == stack_line) {
+					if (iter->second == rational_type(0)) { // if there is some 0-entry, remove it.
+						P_table[select_next_dependent_line].erase(iter);
+						if (P_table[select_next_dependent_line].size() < 2) {
+							// select_next_dependent_line became resolved.
+							normalize_resolved_line(select_next_dependent_line);
+							//##### can we assume that all resolved lines are always normalized? then we might avoid some addiitonal division operations.
+							inline_move_resolved_line(select_next_dependent_line); // ####overload the function that it can find the correct iterator itself by searching id inside the unresolved vector...
+							goto alternate_solve_kinear_system___rerun;
+						}
+						goto alternate_solve_kinear_system___repeat_apply_previous_stack_line;
+					}
 					// then resolve select_next_dependent_line usign a#############
+
+				}
+
+
+				// 
 
 				// check if select_next_dependent_line got resolved -> rerun #############################
 			}
-			
+
 			// resolve high_prio_select using select_next_dependent_line
 
 			resolve_stack.push_back(select_next_dependent_line);
