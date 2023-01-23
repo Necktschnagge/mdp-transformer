@@ -472,13 +472,24 @@ inline void inline_move_resolved_line(
 	std::vector<std::size_t>& unresolved,
 	std::vector<std::size_t>& resolved,
 	std::vector<std::size_t>::const_iterator iterator_inside_vector_unresolved,
-	std::size_t var_eq_id = *iter
+	std::size_t var_eq_id
 ) {
-		// move resolved line into resolved...
-		unresolved.erase(iterator_inside_vector_unresolved);
-		resolved.push_back(var_eq_id);
-	}
-};
+	// move resolved line into resolved...
+	unresolved.erase(iterator_inside_vector_unresolved);
+	resolved.push_back(var_eq_id);
+}
+
+
+inline void inline_move_resolved_line(
+	std::vector<std::size_t>& unresolved,
+	std::vector<std::size_t>& resolved,
+	std::vector<std::size_t>::const_iterator iterator_inside_vector_unresolved
+) {
+	const std::size_t var_eq_id{ *iterator_inside_vector_unresolved }; // check for valid iterator? or add it as call-constraint
+	// move resolved line into resolved...
+	unresolved.erase(iterator_inside_vector_unresolved);
+	resolved.push_back(var_eq_id);
+}
 
 inline void inline_move_resolved_line(
 	std::vector<std::size_t>& unresolved,
@@ -492,9 +503,86 @@ inline void inline_move_resolved_line(
 	resolved.push_back(var_eq_id);
 }
 
+inline auto compare_id_rational_pair(const std::pair<std::size_t, rational_type>& l, const std::pair<std::size_t, rational_type>& r) -> bool {
+	return l.first < r.first;
+}
+
+inline void inline_normalize_resolved_line(
+	std::vector<std::vector<std::pair<std::size_t, rational_type>>>& P_table,
+	std::vector<rational_type>& rew_vector,
+	std::size_t id_resolved
+) {
+	// normalize the resolved line:
+	//### check resolved line has zero entries.. .empty()
+	//### check resolved line has entry, but it is zero.
+	// then throw anbiguous error
+	rew_vector[id_resolved] /= P_table[id_resolved][0].second;
+	P_table[id_resolved][0].second = 1;
+}
+
+
+void resolve_x_j_in_line_i_using_line_j(
+	std::vector<std::vector<std::pair<std::size_t, rational_type>>>& P_table,
+	std::size_t line_i,
+	std::size_t line_j,
+	std::vector<std::pair<std::size_t, rational_type>>::iterator iter_on_x_j_inside_line_i
+) {
+	
+	const auto iter_on_x_j_inside_line_j = std::lower_bound(P_table[line_j].begin(), P_table[line_j].end(), std::make_pair(line_j, rational_type()), compare_id_rational_pair);
+
+	if (iter_on_x_j_inside_line_j == P_table[line_j].end()) {
+		throw 1; // thow error #################
+	}
+	if (iter_on_x_j_inside_line_j->second == rational_type(0)) {
+		throw 2; // throw error ##############
+	}
+	const rational_type equation_multiply_factor{ iter_on_x_j_inside_line_i->second / iter_on_x_j_inside_line_j->second };
+	// resolve the variable "line_j" in equation "select_next_dependent_line"
+	// P_table[select_next_dependent_line] -= a * "line_j" // -> coefficient of x_stack_line in select_next_dependent_line will be zero.
+	auto iter{ P_table[line_i].begin() };
+	auto jter{ P_table[line_j].begin() };
+	std::vector<std::pair<std::size_t, rational_type>> the_new_line_i;
+	while (true) {
+		if (iter == P_table[line_i].end()) {
+			for (; jter != P_table[line_j].end(); ++jter) {
+				the_new_line_i.push_back(*jter);
+				the_new_line_i.back().second *= rational_type(-1) * equation_multiply_factor;
+			}
+			P_table[line_i] = std::move(the_new_line_i);
+			return;
+		}
+		if (jter == P_table[line_j].end()) {
+			for (; iter != P_table[line_i].end(); ++iter) {
+				the_new_line_i.push_back(*iter);
+			}
+			P_table[line_i] = std::move(the_new_line_i);
+			return;
+		}
+		if (iter->first < jter->first) {
+			// only select_next_dependent_line has an entry for this variable..
+			the_new_line_i.push_back(*iter);
+			++iter;
+			continue;
+		}
+		if (iter->first > jter->first) {
+			// only "line_j" has an entry for this variable
+			the_new_line_i.push_back(*jter);
+			the_new_line_i.back().second *= rational_type(-1) * equation_multiply_factor;
+			++jter;
+			continue;
+		}
+		if (iter->first == jter->first) {
+			the_new_line_i.push_back(*iter);
+			the_new_line_i.back().second -= equation_multiply_factor * jter->second;
+			++iter;
+			++jter;
+			continue;
+		}
+	}
+}
 
 template <class _Corpus>
-Mat<_Corpus> alternate_solve_kinear_system() {
+Mat<_Corpus> alternate_solve_linear_system() {
 	std::vector<std::vector<std::pair<std::size_t, rational_type>>> P_table; // must be sorted.
 	std::vector<rational_type> rew_vector;
 
@@ -502,15 +590,6 @@ Mat<_Corpus> alternate_solve_kinear_system() {
 	std::vector<std::size_t> resolved; // is not required to be ordered.
 	std::vector<std::size_t> done; // not sorted
 	std::vector<std::size_t> move_from_unresolved_to_resolved; // for lines that just became resolved
-
-	static const auto compare_entry_pair{
-		[](
-			const std::pair<std::size_t, rational_type>& l,
-			const std::pair<std::size_t, rational_type>& r
-		) -> bool {
-			return l.first < r.first;
-		}
-	};
 
 	static const auto normalize_resolved_line{
 		[&](std::size_t id_resolved) {
@@ -532,7 +611,7 @@ Mat<_Corpus> alternate_solve_kinear_system() {
 
 	// node s   |->   {(s1', r1) (s2',r2) (s3',r3), (self,-1)} "=  r_alpha"
 
-alternate_solve_kinear_system___rerun:
+alternate_solve_linear_system___rerun:
 	// apply resolved lines to all unresolved lines:
 	for (const auto& resolved_id : resolved) {
 		for (const auto& unresolved_line : unresolved) {
@@ -579,7 +658,7 @@ alternate_solve_kinear_system___rerun:
 			});
 		unresolved.erase(new_end, unresolved.cend());
 
-		goto alternate_solve_kinear_system___rerun;
+		goto alternate_solve_linear_system___rerun;
 	}
 	resolved.clear();
 
@@ -612,6 +691,7 @@ alternate_solve_kinear_system___rerun:
 		/*
 			However each time we push a new equation to the resolve_stack,
 			it must have been reduced by all the previous elements of resolve_stack.
+			So the new equation's coefficients of variables which where previously pushed back to "resolve_stack" are zero.
 		*/
 
 		while (true) // while true do some operations on the equations until finally jumping out.
@@ -620,19 +700,13 @@ alternate_solve_kinear_system___rerun:
 			if (P_table[high_prio_select].size() < 2) {
 				// high_prio_select already resolved!
 
-				// normalize the resolved line:
-				normalize_resolved_line()
-				rew_vector[high_prio_select] /= P_table[high_prio_select][0].second;
-				P_table[high_prio_select][0].second = 1;
-
-				// move resolved line into resolved...
-				unresolved.erase(unresolved.cend() - 1);
-				resolved.push_back(high_prio_select);
-				goto alternate_solve_kinear_system___rerun;
+				inline_normalize_resolved_line(P_table, rew_vector, high_prio_select);
+				inline_move_resolved_line(unresolved, resolved, unresolved.cend() - 1);
+				goto alternate_solve_linear_system___rerun; // jump to first part of our strategy.
 			}
 
 			// select a line that high_prio_select depends on...
-			const decltype(P_table[high_prio_select])::const_iterator select_next_dependent_line_it{ // we don't need that iterator.
+			const decltype(P_table[high_prio_select])::const_iterator select_next_dependent_line_it{ // we don't need that iterator.#####
 				[&]() {
 					for (auto iter = P_table[high_prio_select].cbegin(); iter != P_table[high_prio_select].cend(); ++iter) {
 						if (iter->first == high_prio_select) {
@@ -649,49 +723,100 @@ alternate_solve_kinear_system___rerun:
 			const std::size_t select_next_dependent_line{ iter->first };
 
 			for (const auto& stack_line : resolve_stack) {
-				std::sort(
-					P_table[select_next_dependent_line].begin(),
-					P_table[select_next_dependent_line].end(),
-					compare_entry_pair;
-				);
-				std::sort(
-					P_table[stack_line].begin(),
-					P_table[stack_line].end(),
-					compare_entry_pair
-				); // question: optimization: can we sort it when it is pushed into resolve_stack and keep it sorted?
-			alternate_solve_kinear_system___repeat_apply_previous_stack_line:
-				auto iter = std::lower_bound(
+				std::sort(P_table[select_next_dependent_line].begin(), P_table[select_next_dependent_line].end(), compare_entry_pair; );
+				std::sort(P_table[stack_line].begin(), P_table[stack_line].end(), compare_entry_pair); // question: optimization: can we sort it when it is pushed into resolve_stack and keep it sorted? ######
+
+			alternate_solve_linear_system___repeat_apply_previous_stack_line:
+				const auto x_stack_line_in_select_next_dependent_line = std::lower_bound(
 					P_table[select_next_dependent_line].begin(),
 					P_table[select_next_dependent_line].end(),
 					stack_line,
 					compare_entry_pair);
 				// if line is a variable in select_next_dependent_line
-				if (iter != P_table[select_next_dependent_line].end() && iter->first == stack_line) {
-					if (iter->second == rational_type(0)) { // if there is some 0-entry, remove it.
-						P_table[select_next_dependent_line].erase(iter);
+				if (x_stack_line_in_select_next_dependent_line != P_table[select_next_dependent_line].end() && x_stack_line_in_select_next_dependent_line->first == stack_line) {
+					if (x_stack_line_in_select_next_dependent_line->second == rational_type(0)) { // if there is some 0-entry, remove it.
+						P_table[select_next_dependent_line].erase(x_stack_line_in_select_next_dependent_line); // invalidates iterators on P_table[select_next_dependent_line]!
 						if (P_table[select_next_dependent_line].size() < 2) {
 							// select_next_dependent_line became resolved.
 							normalize_resolved_line(select_next_dependent_line);
 							//##### can we assume that all resolved lines are always normalized? then we might avoid some addiitonal division operations.
 							inline_move_resolved_line(select_next_dependent_line); // ####overload the function that it can find the correct iterator itself by searching id inside the unresolved vector...
-							goto alternate_solve_kinear_system___rerun;
+							goto alternate_solve_linear_system___rerun;
 						}
-						goto alternate_solve_kinear_system___repeat_apply_previous_stack_line;
+						goto alternate_solve_linear_system___repeat_apply_previous_stack_line; // need to jump because of invalidates oterators
 					}
-					// then resolve select_next_dependent_line usign a#############
-
+					resolve_x_j_in_line_i_using_line_j(
+						P_table,
+						select_next_dependent_line,
+						stack_line,
+						x_stack_line_in_select_next_dependent_line);
+#if false
+					const auto stack_line_diagonal_element = std::lower_bound(
+						P_table[stack_line].begin(),
+						P_table[stack_line].end(),
+						stack_line,
+						compare_id_rational_pair);
+					if (stack_line_diagonal_element == P_table[stack_line].end()) {
+						throw 1; // thow error #################
+					}
+					if (stack_line_diagonal_element->second == rational_type(0)) {
+						throw 2; // throw error ##############
+					}
+					const rational_type equation_multiply_factor{ x_stack_line_in_select_next_dependent_line->second / stack_line_diagonal_element->second };
+					// resolve the variable "stack_line" in equation "select_next_dependent_line"
+					// P_table[select_next_dependent_line] -= a * "stack_line" // -> coefficient of x_stack_line in select_next_dependent_line will be zero.
+					auto iter{ P_table[select_next_dependent_line].begin() };
+					auto jter{ P_table[stack_line].begin() };
+					std::vector<std::pair<std::size_t, rational_type>> reduced_next_dependent_line;
+					while (true) {
+						if (iter == P_table[select_next_dependent_line].end()) {
+							for (; jter != P_table[stack_line].end(); ++jter) {
+								reduced_next_dependent_line.push_back(*jter);
+								reduced_next_dependent_line.back().second *= rational_type(-1) * equation_multiply_factor;
+							}
+							goto while_end;
+						}
+						if (jter == P_table[stack_line].end()) {
+							for (; iter != P_table[select_next_dependent_line].end()) {
+								reduced_next_dependent_line.push_back(*iter)
+							}
+							goto while_end;
+						}
+						if (iter->first < jter->first) {
+							// only select_next_dependent_line has an entry for this variable..
+							reduced_next_dependent_line.push_back(*iter);
+							++iter;
+							continue;
+						}
+						if (iter->first > jter->first) {
+							// only "stack_line" has an entry for this variable
+							reduced_next_dependent_line.push_back(*jter);
+							reduced_next_dependent_line.back().second *= rational_type(-1) * equation_multiply_factor;
+							++jter;
+							continue;
+						}
+						if (iter->first == jter->first) {
+							reduced_next_dependent_line.push_back(*iter);
+							reduced_next_dependent_line.back().second -= equation_multiply_factor * jter->second;
+							++iter;
+							++jter;
+							continue;
+						}
+					}
+				while_end:
+					(void)iter;
+#endif
 				}
-
-
-				// 
-
-				// check if select_next_dependent_line got resolved -> rerun #############################
-			}
+			} // for (const auto& stack_line : resolve_stack)
+			// check if select_next_dependent_line got resolved -> rerun #############################
+			if (P_table[select_next_dependent_line].size() < 2) {
+				inline_normalize_resolved_line(P_table, rew_vector, select_next_dependent_line);
+				}
 
 			// resolve high_prio_select using select_next_dependent_line
 
 			resolve_stack.push_back(select_next_dependent_line);
-		}
+			}
 
 		// look for dependet line -> a---------------
 		// apply all lines in resolve_stack front to back into a
@@ -702,7 +827,7 @@ alternate_solve_kinear_system___rerun:
 		// check high_prio_select resolved? -> goto rerun! ------> comes at begin of new loop run...
 		// goto look for next dependet
 
-	}
+		}
 
 
 	move s into done(= solved and applied into all other equations...)
@@ -722,7 +847,7 @@ alternate_solve_kinear_system___rerun:
 	}
 
 
-}
+	}
 
 int main(int argc, char* argv[])
 {
