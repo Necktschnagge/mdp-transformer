@@ -145,3 +145,34 @@ bool check_valid_mdp(const nlohmann::json& input, mdp& fill_in) {
 	}
 	return true;
 }
+
+nlohmann::json mdp_to_json(const mdp& m) {
+	nlohmann::json j = nlohmann::json::object();
+	j[keywords::states] = m.states;
+	j[keywords::actions] = m.actions;
+	for (const auto& state_paired_action_state_prob : m.probabilities) {
+		for (const auto& action_paired_state_prob : state_paired_action_state_prob.second) {
+			for (const auto& state_paired_prob : action_paired_state_prob.second) {
+				if (state_paired_prob.second.denominator() == rational_type::int_type(1)) {
+					j[keywords::probabilities][state_paired_action_state_prob.first][action_paired_state_prob.first][state_paired_prob.first] = state_paired_prob.second.numerator().str();
+				}
+				else {
+					j[keywords::probabilities][state_paired_action_state_prob.first][action_paired_state_prob.first][state_paired_prob.first] = state_paired_prob.second.numerator().str() + "/" + state_paired_prob.second.denominator().str();
+				}
+			}
+		}
+	}
+	j[keywords::initial] = m.initial;
+	for (const auto& state_paired_action : m.rewards) {
+		for (const auto& action_paired_reward : state_paired_action.second) {
+			if (action_paired_reward.second.denominator() == rational_type::int_type(1)) {
+				j[keywords::rewards][state_paired_action.first][action_paired_reward.first] = action_paired_reward.second.numerator().str();
+			}
+			else {
+				j[keywords::rewards][state_paired_action.first][action_paired_reward.first] = action_paired_reward.second.numerator().str() + "/" + action_paired_reward.second.denominator().str();
+			}
+		}
+	}
+	j[keywords::targets] = m.targets;
+	return j;
+}
