@@ -29,20 +29,6 @@ bool check_mdp_constraints(const mdp& m) {
 	return true;
 }
 
-class further_expand_record {
-public:
-	std::string new_state_name;
-	std::string old_state_name;
-	rational_type accumulated_reward;
-
-	further_expand_record(const std::string& old_state_name, rational_type accumulated_reward, const std::string& new_state_name) :
-		new_state_name(new_state_name),
-		old_state_name(old_state_name),
-		accumulated_reward(accumulated_reward)
-	{}
-
-};
-
 std::map<std::string, rational_type> calc_delta_max_state_wise(const mdp& m) {
 
 
