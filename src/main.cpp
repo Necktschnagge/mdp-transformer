@@ -132,7 +132,7 @@ mdp unfold(const mdp& m, const _Modification& func, rational_type threshold, con
 			n.rewards[expand.new_state_name][action_name] = func(m_next_rew) - func(expand.accumulated_reward); // is always okay.
 			// we need to check if we passed threshold + delta_max....
 
-			for (const auto choose_next_state : distr) {
+			for (const auto& choose_next_state : distr) {
 				const auto& next_state_name = choose_next_state.first;
 				const auto& prob = choose_next_state.second;
 
