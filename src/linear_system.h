@@ -2,6 +2,21 @@
 
 #include "custom_types.h"
 
+namespace feature_toggle {
+	constexpr bool LINEAR_SYSTEMS_DEBUG_OUTPUT{ true };
+	constexpr bool LINEAR_SYSTEMS_DEBUG_CHECKS{ true };
+}
+
+namespace linear_systems {
+	using var_id = std::size_t;
+	using id_vector = std::vector<var_id>;
+	using rational_vector = std::vector<rational_type>;
+	using matrix_entry = std::pair<std::size_t, rational_type>;
+	using matrix_line = std::vector<matrix_entry>;
+	using matrix = std::vector<matrix_line>;
+}
+
+#if false
 template <class _Corpus>
 class Mat {
 public:
@@ -31,49 +46,55 @@ Mat<_Corpus> enhanced_solve_linear_system(Mat<_Corpus> A, Mat<_Corpus> b, Mat<bo
 
 }
 
+#endif
+
+/*
+	@param where_is_x_in_unresolved_variables must be valid iterator for unresolved_variables, but no end iterator.
+	@param x_id must be the value at where where_is_x_in_unresolved_variables is pointing to
+*/
 inline void inline_move_resolved_line(
-	std::vector<std::size_t>& unresolved,
-	std::vector<std::size_t>& resolved,
-	std::vector<std::size_t>::const_iterator iterator_inside_vector_unresolved,
-	std::size_t var_eq_id
+	linear_systems::id_vector& unresolved_variables,
+	linear_systems::id_vector& resolved_variables,
+	linear_systems::id_vector::const_iterator where_is_x_in_unresolved_variables,
+	linear_systems::var_id x_id
 ) {
-	// move resolved line into resolved...
-	unresolved.erase(iterator_inside_vector_unresolved);
-	resolved.push_back(var_eq_id);
+	unresolved_variables.erase(where_is_x_in_unresolved_variables);
+	resolved_variables.push_back(x_id);
 }
 
-
+/*
+	@param where_is_x_in_unresolved_variables must be valid iterator for unresolved_variables, but no end iterator.
+*/
 inline void inline_move_resolved_line(
-	std::vector<std::size_t>& unresolved,
-	std::vector<std::size_t>& resolved,
-	std::vector<std::size_t>::const_iterator iterator_inside_vector_unresolved
+	linear_systems::id_vector& unresolved_variables,
+	linear_systems::id_vector& resolved_variables,
+	linear_systems::id_vector::const_iterator where_is_x_in_unresolved_variables
 ) {
-	const std::size_t var_eq_id{ *iterator_inside_vector_unresolved }; // check for valid iterator? or add it as call-constraint
-	// move resolved line into resolved...
-	unresolved.erase(iterator_inside_vector_unresolved);
-	resolved.push_back(var_eq_id);
+	const linear_systems::var_id x_id{ *where_is_x_in_unresolved_variables }; // check for valid iterator? or add it as call-constraint
+	unresolved_variables.erase(where_is_x_in_unresolved_variables);
+	resolved_variables.push_back(x_id);
 }
 
 inline void inline_move_resolved_line(
-	std::vector<std::size_t>& unresolved,
-	std::vector<std::size_t>& resolved,
-	std::size_t var_eq_id
+	linear_systems::id_vector& unresolved_variables,
+	linear_systems::id_vector& resolved_variables,
+	linear_systems::var_id x_id
 ) {
 	// move resolved line into resolved...
-	auto iterator_inside_vector_unresolved = std::find(unresolved.cbegin(), unresolved.cend(), var_eq_id);//### check this whole line! 
+	auto where_is_x_in_unresolved_variables = std::find(unresolved_variables.cbegin(), unresolved_variables.cend(), x_id);//### check this whole line! 
 	// unresolved darf nicht sorted sein, check for find complies with unsorted container best##########
-	unresolved.erase(iterator_inside_vector_unresolved); // what in case of end iterator! throw an error!
-	resolved.push_back(var_eq_id);
+	unresolved_variables.erase(where_is_x_in_unresolved_variables); // what in case of end iterator! throw an error!
+	resolved_variables.push_back(x_id);
 }
 
-inline auto compare_id_rational_pair(const std::pair<std::size_t, rational_type>& l, const std::pair<std::size_t, rational_type>& r) -> bool {
+inline bool compare_id_rational_pair(const linear_systems::matrix_entry& l, const linear_systems::matrix_entry& r) {
 	return l.first < r.first;
 }
 
 inline void inline_normalize_resolved_line(
-	std::vector<std::vector<std::pair<std::size_t, rational_type>>>& P_table,
-	std::vector<rational_type>& rew_vector,
-	std::size_t id_resolved
+	linear_systems::matrix& P_table,
+	linear_systems::rational_vector& rew_vector,
+	linear_systems::var_id id_resolved
 ) {
 	// normalize the resolved line:
 	//### check resolved line has zero entries.. .empty()
@@ -85,10 +106,10 @@ inline void inline_normalize_resolved_line(
 
 
 inline void resolve_x_j_in_line_i_using_line_j(
-	std::vector<std::vector<std::pair<std::size_t, rational_type>>>& P_table,
-	std::size_t line_i,
-	std::size_t line_j,
-	std::vector<std::pair<std::size_t, rational_type>>::iterator iter_on_x_j_inside_line_i
+	linear_systems::matrix& P_table,
+	linear_systems::var_id line_i,
+	linear_systems::var_id line_j,
+	linear_systems::matrix_line::iterator iter_on_x_j_inside_line_i
 ) {
 
 	const auto iter_on_x_j_inside_line_j = std::lower_bound(P_table[line_j].begin(), P_table[line_j].end(), std::make_pair(line_j, rational_type()), compare_id_rational_pair);
@@ -144,39 +165,29 @@ inline void resolve_x_j_in_line_i_using_line_j(
 	}
 }
 
-template <class _Corpus>
-inline Mat<_Corpus> alternate_solve_linear_system() {
-	std::vector<std::vector<std::pair<std::size_t, rational_type>>> P_table; // must be sorted.
-	std::vector<rational_type> rew_vector;
+inline void apply_resolved_variables_on_unresolved_ones(
+	linear_systems::matrix& P,
+	linear_systems::rational_vector& r,
+	linear_systems::id_vector& unresolved, // they have an external order. it should be kept.
+	linear_systems::id_vector& resolved,
+	linear_systems::id_vector& done// is not required to be ordered.
+) {
+	using namespace linear_systems;
+	id_vector move_from_unresolved_to_resolved; // for lines that just became resolved
 
-	std::vector<std::size_t> unresolved; // they have an external order. it should be kept.
-	std::vector<std::size_t> resolved; // is not required to be ordered.
-	std::vector<std::size_t> done; // not sorted
-	std::vector<std::size_t> move_from_unresolved_to_resolved; // for lines that just became resolved
-
-	static const auto move_resolved_line{
-		[&](std::vector<std::size_t>::const_iterator iterator_inside_vector_unresolved, std::size_t var_eq_id = *iter) {
-			// move resolved line into resolved...
-			unresolved.erase(iterator_inside_vector_unresolved);
-			resolved.push_back(var_eq_id);
-		}
-	};
-
-	// node s   |->   {(s1', r1) (s2',r2) (s3',r3), (self,-1)} "=  r_alpha"
-
-alternate_solve_linear_system___rerun:
+rerun_apply_resolved_variables:
 	// apply resolved lines to all unresolved lines:
 	for (const auto& resolved_id : resolved) {
 		for (const auto& unresolved_line : unresolved) {
 			auto found = std::lower_bound(
-				P_table[unresolved_line].cbegin(),
-				P_table[unresolved_line].cend(),
-				resolved_id,
-				compare_entry_pair);
-			if (found != P_table[unresolved_line].cend()) {
-				rew_vector[unresolved_line] -= rew_vector[resolved_id] * found->second;
-				P_table[unresolved_line].erase(found);
-				if (P_table[unresolved_line].size() < 2) {
+				P[unresolved_line].cbegin(),
+				P[unresolved_line].cend(),
+				std::make_pair(resolved_id, rational_type(0)),
+				compare_id_rational_pair);
+			if (found != P[unresolved_line].cend()) {
+				r[unresolved_line] -= r[resolved_id] * found->second;
+				P[unresolved_line].erase(found);
+				if (P[unresolved_line].size() < 2) {
 					// the line is resolved;
 					move_from_unresolved_to_resolved.push_back(unresolved_line);
 				}
@@ -189,12 +200,12 @@ alternate_solve_linear_system___rerun:
 		// normalize the new resolved lines
 		for (const auto& movee : move_from_unresolved_to_resolved) {
 			// check: 
-			if (P_table[movee][1].first != movee) {
+			if (P[movee][1].first != movee) {
 				throw 0;
 			}
 			// use normalize_resolved_line!!!#######
-			rew_vector[movee] /= P_table[movee][1].second; // #### impossibly a zero... (only if broken)
-			P_table[movee][1].second = rational_type(1);
+			r[movee] /= P[movee][1].second; // #### impossibly a zero... (only if broken)
+			P[movee][1].second = rational_type(1);
 		}
 
 		// remove from unresolved, put into resolved:
@@ -211,9 +222,38 @@ alternate_solve_linear_system___rerun:
 			});
 		unresolved.erase(new_end, unresolved.cend());
 
-		goto alternate_solve_linear_system___rerun;
+		goto rerun_apply_resolved_variables;
 	}
 	resolved.clear();
+}
+
+/*
+	@param P must be a quadratic matrix for solving Px = r, P is a std::vector of its matrix lines.
+	@param r
+	@param unresolved must contain all variable ids where there lines are not trivial like p * x_i = r_i.
+			Its order is crucial for the performance of solving.
+			As far as possible a variable x that depends on y should appear prior to y in this vector.
+	@param resolved should be disjoint with unresolved. Together both vectors need to cover all variables.
+*/
+inline void solve_linear_system_dependency_order_optimized(
+	linear_systems::matrix P,
+	linear_systems::rational_vector r,
+	linear_systems::id_vector unresolved, // they have an external order. it should be kept.
+	linear_systems::id_vector resolved // is not required to be ordered.
+) {
+	using namespace linear_systems;
+
+	matrix& P_table{ P }; // must be sorted.
+	rational_vector& rew_vector{ r };
+	id_vector done; // not sorted
+	// node s   |->   {(s1', r1) (s2',r2) (s3',r3), (self,-1)} "=  r_alpha"
+
+	/* inner constraints:
+		* The order of unresolved has to be kept. The last elements have priority for resolving.
+	*/
+
+alternate_solve_linear_system___rerun:
+	apply_resolved_variables_on_unresolved_ones(P, r, unresolved, resolved, done);
 
 	/*
 		Here we do not have any resolved equations ($a_{m,n} * x_i = r_i$) anymore that we can apply to the unresolved equations.
@@ -249,6 +289,7 @@ alternate_solve_linear_system___rerun:
 
 		while (true) // while true do some operations on the equations until finally jumping out.
 		{
+		begin_of_inner_while:
 			// check high_prio_select for already being resolved...
 			if (P_table[high_prio_select].size() < 2) {
 				// high_prio_select already resolved!
@@ -259,41 +300,46 @@ alternate_solve_linear_system___rerun:
 			}
 
 			// select a line that high_prio_select depends on...
-			const decltype(P_table[high_prio_select])::const_iterator select_next_dependent_line_it{ // we don't need that iterator.#####
-				[&]() {
-					for (auto iter = P_table[high_prio_select].cbegin(); iter != P_table[high_prio_select].cend(); ++iter) {
-						if (iter->first == high_prio_select) {
-							continue; // found diagonal entry
-						}
-						if (iter->second == rational_type(0)) {
-							P_table[high_prio_select].erase(iter); // invalidates iterators!!!!
-							continue;
-						}
-						return iter;
-					}
-				}()
-			};
-			const std::size_t select_next_dependent_line{ iter->first };
+			size_t select_next_dependent_line;
+			matrix_line::iterator iter_of_next_dependent_inside_high_prio_select;
+			for (auto iter = P_table[high_prio_select].begin(); true; ++iter) {
+				if (iter != P_table[high_prio_select].end())
+					goto begin_of_inner_while;
+				if (iter->first == high_prio_select) {
+					continue; // found diagonal entry
+				}
+				if (iter->second == rational_type(0)) {
+					P_table[high_prio_select].erase(iter); // invalidates iterators!!!!
+					goto begin_of_inner_while;
+				}
+				select_next_dependent_line = iter->first;
+				iter_of_next_dependent_inside_high_prio_select = iter;
+				break;
+			}
+
+			// per design we do not choose a line already contained in stack (check this in a debug mode...)
+
+			//const std::size_t select_next_dependent_line{ iter->first };
 
 			for (const auto& stack_line : resolve_stack) {
-				std::sort(P_table[select_next_dependent_line].begin(), P_table[select_next_dependent_line].end(), compare_entry_pair; );
-				std::sort(P_table[stack_line].begin(), P_table[stack_line].end(), compare_entry_pair); // question: optimization: can we sort it when it is pushed into resolve_stack and keep it sorted? ######
+				std::sort(P_table[select_next_dependent_line].begin(), P_table[select_next_dependent_line].end(), compare_id_rational_pair);
+				std::sort(P_table[stack_line].begin(), P_table[stack_line].end(), compare_id_rational_pair); // question: optimization: can we sort it when it is pushed into resolve_stack and keep it sorted? ######
 
 			alternate_solve_linear_system___repeat_apply_previous_stack_line:
 				const auto x_stack_line_in_select_next_dependent_line = std::lower_bound(
 					P_table[select_next_dependent_line].begin(),
 					P_table[select_next_dependent_line].end(),
-					stack_line,
-					compare_entry_pair);
+					std::make_pair(stack_line, rational_type(0)),
+					compare_id_rational_pair);
 				// if line is a variable in select_next_dependent_line
 				if (x_stack_line_in_select_next_dependent_line != P_table[select_next_dependent_line].end() && x_stack_line_in_select_next_dependent_line->first == stack_line) {
 					if (x_stack_line_in_select_next_dependent_line->second == rational_type(0)) { // if there is some 0-entry, remove it.
 						P_table[select_next_dependent_line].erase(x_stack_line_in_select_next_dependent_line); // invalidates iterators on P_table[select_next_dependent_line]!
 						if (P_table[select_next_dependent_line].size() < 2) {
 							// select_next_dependent_line became resolved.
-							normalize_resolved_line(select_next_dependent_line);
+							inline_normalize_resolved_line(P_table, rew_vector, select_next_dependent_line);
 							//##### can we assume that all resolved lines are always normalized? then we might avoid some addiitonal division operations.
-							inline_move_resolved_line(select_next_dependent_line); // ####overload the function that it can find the correct iterator itself by searching id inside the unresolved vector...
+							inline_move_resolved_line(unresolved, resolved, select_next_dependent_line); // ####overload the function that it can find the correct iterator itself by searching id inside the unresolved vector...
 							goto alternate_solve_linear_system___rerun;
 						}
 						goto alternate_solve_linear_system___repeat_apply_previous_stack_line; // need to jump because of invalidates oterators
@@ -303,86 +349,28 @@ alternate_solve_linear_system___rerun:
 						select_next_dependent_line,
 						stack_line,
 						x_stack_line_in_select_next_dependent_line);
-#if false
-					const auto stack_line_diagonal_element = std::lower_bound(
-						P_table[stack_line].begin(),
-						P_table[stack_line].end(),
-						stack_line,
-						compare_id_rational_pair);
-					if (stack_line_diagonal_element == P_table[stack_line].end()) {
-						throw 1; // thow error #################
-					}
-					if (stack_line_diagonal_element->second == rational_type(0)) {
-						throw 2; // throw error ##############
-					}
-					const rational_type equation_multiply_factor{ x_stack_line_in_select_next_dependent_line->second / stack_line_diagonal_element->second };
-					// resolve the variable "stack_line" in equation "select_next_dependent_line"
-					// P_table[select_next_dependent_line] -= a * "stack_line" // -> coefficient of x_stack_line in select_next_dependent_line will be zero.
-					auto iter{ P_table[select_next_dependent_line].begin() };
-					auto jter{ P_table[stack_line].begin() };
-					std::vector<std::pair<std::size_t, rational_type>> reduced_next_dependent_line;
-					while (true) {
-						if (iter == P_table[select_next_dependent_line].end()) {
-							for (; jter != P_table[stack_line].end(); ++jter) {
-								reduced_next_dependent_line.push_back(*jter);
-								reduced_next_dependent_line.back().second *= rational_type(-1) * equation_multiply_factor;
-							}
-							goto while_end;
-						}
-						if (jter == P_table[stack_line].end()) {
-							for (; iter != P_table[select_next_dependent_line].end()) {
-								reduced_next_dependent_line.push_back(*iter)
-							}
-							goto while_end;
-						}
-						if (iter->first < jter->first) {
-							// only select_next_dependent_line has an entry for this variable..
-							reduced_next_dependent_line.push_back(*iter);
-							++iter;
-							continue;
-						}
-						if (iter->first > jter->first) {
-							// only "stack_line" has an entry for this variable
-							reduced_next_dependent_line.push_back(*jter);
-							reduced_next_dependent_line.back().second *= rational_type(-1) * equation_multiply_factor;
-							++jter;
-							continue;
-						}
-						if (iter->first == jter->first) {
-							reduced_next_dependent_line.push_back(*iter);
-							reduced_next_dependent_line.back().second -= equation_multiply_factor * jter->second;
-							++iter;
-							++jter;
-							continue;
-						}
-					}
-				while_end:
-					(void)iter;
-#endif
 				}
 			} // for (const auto& stack_line : resolve_stack)
 			// check if select_next_dependent_line got resolved -> rerun #############################
 			if (P_table[select_next_dependent_line].size() < 2) {
 				inline_normalize_resolved_line(P_table, rew_vector, select_next_dependent_line);
+				inline_move_resolved_line(unresolved, resolved, select_next_dependent_line);
+				goto alternate_solve_linear_system___rerun;
 			}
 
-			// resolve high_prio_select using select_next_dependent_line
+			// resolve high_prio_select using select_next_dependent_line:
+			resolve_x_j_in_line_i_using_line_j(
+				P_table,
+				high_prio_select,
+				select_next_dependent_line,
+				iter_of_next_dependent_inside_high_prio_select);
 
 			resolve_stack.push_back(select_next_dependent_line);
 		}
-
-		// look for dependet line -> a---------------
-		// apply all lines in resolve_stack front to back into a
-		// check if a is resolved -> then break and goto rerun!
-		// 
-		// resolve_stack.push_back(a);
-		// resolve a in high_prio_select
-		// check high_prio_select resolved? -> goto rerun! ------> comes at begin of new loop run...
-		// goto look for next dependet
-
 	}
 
 
+	/*
 	move s into done(= solved and applied into all other equations...)
 		if not yet(not resolved empty) {
 			solve the highest prio line using only lines which are dependet.
@@ -398,6 +386,6 @@ alternate_solve_linear_system___rerun:
 	if not yet(not resolved empty) {
 		solve the highest prio line using only lines which are dependet.
 	}
-
+	*/
 
 }

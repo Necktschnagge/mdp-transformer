@@ -483,6 +483,8 @@ int main(int argc, char* argv[])
 	standard_logger()->info("got unfolded mdp:");
 	standard_logger()->info(mdp_to_json(n).dump(3));
 
+
+	solve_linear_system_dependency_order_optimized(linear_systems::matrix(), linear_systems::rational_vector(), linear_systems::id_vector(), linear_systems::id_vector());///####### only fo debug compile
 	//additional checks for our assumptions #####
 
 
