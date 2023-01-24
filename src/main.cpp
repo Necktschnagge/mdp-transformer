@@ -259,65 +259,98 @@ void optimize_scheduler(mdp& m, const std::vector<std::string>& ordered_variable
 		}
 	}
 
-	// create matrix
-	linear_systems::matrix mat;
-	linear_systems::rational_vector rew;
-	for (const auto& var : ordered_variables) {
-		const auto& line_var_id{ mat.size() };
-		if (cont.available_actions_per_state[var].empty()) { // it is a target state
-			rew.emplace_back(0);
-			linear_systems::matrix_line line = { { std::make_pair(line_var_id, rational_type(1)) } };
-			mat.emplace_back(std::move(line));
-		}
-		else { // it is no target state
-			const auto& action_id{ cont.sched[var] };
-			const auto action{ cont.available_actions_per_state[var][action_id] };
-			rew.emplace_back(m.rewards[var][action]);
-			linear_systems::matrix_line line;
-			for (const auto& state_paired_rational : m.probabilities[var][action]) {
-				const auto& var_id{ get_index(ordered_variables, state_paired_rational.first) };
-				auto value{ state_paired_rational.second * rational_type(-1) };
-				if (var_id == line_var_id) value += rational_type(1);
-				line.push_back(std::make_pair(var_id, value));
+	while (true) {
+
+		// create matrix
+		linear_systems::matrix mat;
+		linear_systems::rational_vector rew;
+		for (const auto& var : ordered_variables) {
+			const auto& line_var_id{ mat.size() };
+			if (cont.available_actions_per_state[var].empty()) { // it is a target state
+				rew.emplace_back(0);
+				linear_systems::matrix_line line = { { std::make_pair(line_var_id, rational_type(1)) } };
+				mat.emplace_back(std::move(line));
+			}
+			else { // it is no target state
+				const auto& action_id{ cont.sched[var] };
+				const auto action{ cont.available_actions_per_state[var][action_id] };
+				rew.emplace_back(m.rewards[var][action]);
+				linear_systems::matrix_line line;
+				for (const auto& state_paired_rational : m.probabilities[var][action]) {
+					const auto& var_id{ get_index(ordered_variables, state_paired_rational.first) };
+					auto value{ state_paired_rational.second * rational_type(-1) };
+					if (var_id == line_var_id) value += rational_type(1);
+					line.push_back(std::make_pair(var_id, value));
+				}
 			}
 		}
-	}
-	// Px = rew
-	// target: xi = 0
-	// others: xj = Pk xk + r 
-	// .....->  (d_j - Pk) x = r
-	// 
-	linear_systems::id_vector unresolved;
-	linear_systems::id_vector resolved;
-	std::transform(
-		m.targets.begin(),
-		m.targets.end(),
-		std::back_inserter(resolved),
-		[&](const std::string& s) -> linear_systems::var_id { return get_index(ordered_variables, s); }
-	);
-	std::sort(resolved.begin(), resolved.end());
+		// Px = rew
+		// target: xi = 0
+		// others: xj = Pk xk + r 
+		// .....->  (d_j - Pk) x = r
+		//
 
-	for (linear_systems::var_id i{ 0 }; i < mat.size(); ++i) {
-		unresolved.push_back(i);
-	}
+		linear_systems::id_vector unresolved;
+		linear_systems::id_vector resolved;
+		std::transform(
+			m.targets.begin(),
+			m.targets.end(),
+			std::back_inserter(resolved),
+			[&](const std::string& s) -> linear_systems::var_id { return get_index(ordered_variables, s); }
+		);
+		std::sort(resolved.begin(), resolved.end());
 
-	auto new_end = std::copy_if(
-		unresolved.begin(),
-		unresolved.end(),
-		unresolved.begin(),
-		[&](const linear_systems::var_id& var) -> bool { 
-			/* not contained in resolved */
-			auto found = std::lower_bound(resolved.cbegin(), resolved.cend(), var);
-			return found == resolved.cend() || *found != var;
+		for (linear_systems::var_id i{ 0 }; i < mat.size(); ++i) {
+			unresolved.push_back(i);
 		}
-	);
-	unresolved.erase(new_end, unresolved.end());
 
-	// solve matrix
-	solve_linear_system_dependency_order_optimized(mat, rew, unresolved, resolved);
+		auto new_end = std::copy_if(
+			unresolved.begin(),
+			unresolved.end(),
+			unresolved.begin(),
+			[&](const linear_systems::var_id& var) -> bool {
+				/* not contained in resolved */
+				auto found = std::lower_bound(resolved.cbegin(), resolved.cend(), var);
+				return found == resolved.cend() || *found != var;
+			}
+		);
+		unresolved.erase(new_end, unresolved.end());
 
+		// solve matrix
+		solve_linear_system_dependency_order_optimized(mat, rew, unresolved, resolved);
 
+		linear_systems::rational_vector current_solution = rew;
 
+		bool found_improvement{ false };
+
+		// improve the scheduler...
+		for (auto var = ordered_variables.cbegin(); var != ordered_variables.cend(); ++var) {
+			if (cont.available_actions_per_state[*var].empty()) { // no action to choose...
+				continue;
+			}
+			linear_systems::var_id var_id = var - ordered_variables.cbegin();
+			auto select_action = cont.sched[*var];
+			auto best_seen_value = current_solution[var_id];
+			for (auto action = cont.available_actions_per_state[*var].cbegin(); action != cont.available_actions_per_state[*var].cend(); ++action) {
+				std::size_t action_id = action - cont.available_actions_per_state[*var].cbegin();
+				auto& distr = m.probabilities[*var][*action];
+				rational_type accummulated{ m.rewards[*var][*action] };
+				for (const auto& state_paired_prob : distr) {
+					accummulated += state_paired_prob.second * current_solution[get_index(ordered_variables, state_paired_prob.first)];
+				}
+				if (accummulated > best_seen_value) {
+					select_action = action_id;
+					best_seen_value = accummulated;
+					found_improvement = true;
+				}
+			}
+			cont.sched[*var] = select_action;
+		}
+
+		if (!found_improvement) {
+			return;
+		}
+	}
 }
 
 int main(int argc, char* argv[])
