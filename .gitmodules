@@ -1,0 +1,9 @@
+[submodule "extern/spdlog"]
+	path = extern/spdlog
+	url = https://github.com/gabime/spdlog
+[submodule "extern/googletest"]
+	path = extern/googletest
+	url = https://github.com/google/googletest
+[submodule "extern/json"]
+	path = extern/json
+	url = https://github.com/nlohmann/json.git
