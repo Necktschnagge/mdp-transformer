@@ -277,6 +277,19 @@ bool check_valid_mdp(const nlohmann::json& input, mdp& fill_in) {
 	return true;
 }
 
+bool check_mdp_constraints(const mdp& m) {
+	try {
+		mdp_sanity::check("mdp_is_object", input.is_object());
+
+
+	}
+	catch (mdp_sanity& e) {
+		standard_logger()->error(e.what());
+		return false;
+	}
+	return true;
+}
+
 class further_expand_record {
 public:
 	std::string new_state_name;
@@ -291,7 +304,7 @@ public:
 
 };
 
-std::map<std::string, rational_type> calc_delta_max(const mdp& m) {
+std::map<std::string, rational_type> calc_delta_max_state_wise(const mdp& m) {
 
 
 	std::map<std::string, rational_type> result;
@@ -465,7 +478,7 @@ int main(int argc, char* argv[])
 		standard_logger()->info("check MDP: ok");
 	}
 
-	std::map<std::string, rational_type> delta_max = calc_delta_max(m);
+	std::map<std::string, rational_type> delta_max = calc_delta_max_state_wise(m);
 
 	mdp n;
 
@@ -477,22 +490,37 @@ int main(int argc, char* argv[])
 			: x + threshold;
 	};
 
+	// create unfold-mdp
 	n = unfold(m, crinkle, threshold, delta_max);
 	//#### will break if in m state names use underscore
 
+	
 	standard_logger()->info("got unfolded mdp:");
 	standard_logger()->info(mdp_to_json(n).dump(3));
 
-
-	solve_linear_system_dependency_order_optimized(linear_systems::matrix(), linear_systems::rational_vector(), linear_systems::id_vector(), linear_systems::id_vector());///####### only fo debug compile
+	/// this is only compile check...
+	auto rewards = linear_systems::rational_vector();
+	solve_linear_system_dependency_order_optimized(linear_systems::matrix(), rewards, linear_systems::id_vector(), linear_systems::id_vector());///####### only fo debug compile
 	//additional checks for our assumptions #####
 
 
-	// create unfold-mdp
-
-
-
 	// find an optimal det memless scheduler
+	// 
+	//select a scheduler randomly..
+	// A:
+	// MDP + scheduler -> LGS
+	// solve LGS...
+	// locally select an optimal scheduler..
+	// loop -> A, but
+	// if there was no better sched decision found anywhere, stop.
+
+	// check for all nodes with multiple optimal solutions...
+
+
+
+
+
+
 
 
 	standard_logger()->info("     DONE     ");
