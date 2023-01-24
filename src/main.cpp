@@ -14,8 +14,50 @@ namespace feature_toogle {
 
 }
 
+std::set<std::string> calc_reachable_states(const mdp& m) {
+
+	std::set<std::string> reachable_states;
+
+	std::vector<std::string> to_expand;
+
+	reachable_states.insert(m.initial);
+	to_expand.push_back(m.initial);
+
+	while (!to_expand.empty()) {
+
+		const std::string state = to_expand.back();
+		to_expand.pop_back();
+		auto& transitions = m.probabilities.at(state);
+
+		for (const auto& action_paired_distr : transitions) {
+			for (const auto& next_state_paired_prob : action_paired_distr.second) {
+				if (next_state_paired_prob.second != rational_type(0)) {
+					const auto& next_state{ next_state_paired_prob.first };
+					const auto [iter, insertion_took_place] = reachable_states.insert(next_state);
+					if (insertion_took_place) {
+						to_expand.push_back(next_state);
+					}
+				}
+			}
+		}
+	}
+	
+	return reachable_states;
+}
 
 bool check_mdp_constraints(const mdp& m) {
+
+	std::set<std::string> reachable_states = calc_reachable_states(m);
+	
+	m.
+	
+		
+
+
+	// checking P>0(Finally target) for all states!
+
+	// 
+
 	//### put in all the requirements here!!!
 	try {
 		mdp_sanity::check("mdp_is_object",m.actions.size() > 0);
@@ -119,7 +161,7 @@ int main(int argc, char* argv[])
 
 	// find an optimal det memless scheduler
 	// 
-	//select a scheduler randomly..
+	// select a scheduler randomly..
 	// A:
 	// MDP + scheduler -> LGS
 	// solve LGS...
