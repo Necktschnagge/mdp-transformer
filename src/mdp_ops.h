@@ -72,7 +72,7 @@ public:
 };
 
 template<class _Modification>
-inline mdp unfold(const mdp& m, const _Modification& func, rational_type threshold, const std::map<std::string, rational_type>& delta_max) {
+inline mdp unfold(const mdp& m, const _Modification& func, rational_type threshold, const std::map<std::string, rational_type>& delta_max, std::vector<std::string>& ordered_variables) {
 
 	std::list<further_expand_record> further_expand;
 	/*
@@ -92,6 +92,7 @@ inline mdp unfold(const mdp& m, const _Modification& func, rational_type thresho
 	const auto initial_state_name = std::string(get_new_state_name(m.initial, rational_type(0)));
 
 	n.states.insert(initial_state_name);
+	ordered_variables.push_back(initial_state_name);
 	n.initial = initial_state_name;
 
 	further_expand.emplace_back(m.initial, rational_type(0), initial_state_name);
@@ -139,6 +140,7 @@ inline mdp unfold(const mdp& m, const _Modification& func, rational_type thresho
 				// add the n_next_state to the todo-list (if we have not seen it before)
 				if (n.states.find(new_next_state_name) == n.states.cend()) {
 					n.states.insert(new_next_state_name);
+					ordered_variables.push_back(new_next_state_name);
 					further_expand.emplace_back(next_state_name, m_next_rew, new_next_state_name);
 				};
 

@@ -121,7 +121,7 @@ bool check_mdp_constraints_and_simplify(mdp& m) {
 	}
 
 	// check probability for reaching target = 1
-	
+
 	// first set of all states which reach under every scheduler target with positive prob.
 	// then we have this ones that can never reach target. -> X
 	// find all states that can reach X with positive probability. There should be no such states.
@@ -134,7 +134,7 @@ bool check_mdp_constraints_and_simplify(mdp& m) {
 		for (auto& state_paired_transitions : m.probabilities) {
 			// check if state_paired_transitions.first is eventually_target;
 			if (!set_contains(eventually_target, state_paired_transitions.first)) {
-				// check: for each action there is a probability 
+				// check: for each action there is a probability
 				for (auto& action_paired_distr : state_paired_transitions.second) {
 					for (auto iter = action_paired_distr.second.begin(); iter != action_paired_distr.second.end();) {
 						if (!is_reachable(iter->first)) {
@@ -151,11 +151,11 @@ bool check_mdp_constraints_and_simplify(mdp& m) {
 		}
 	}
 	*/
-	
+
 	//check poisitive cycles inside delta_max #####
-	
+
 	// check for integer rewards. ######
-	
+
 	return true;
 }
 
@@ -193,7 +193,132 @@ std::map<std::string, rational_type> calc_delta_max_state_wise(const mdp& m) {
 	return result;
 }
 
+class mdp_view {
 
+	mdp* m;
+
+public:
+	mdp_view(mdp& m) : m(&m) {}
+
+	std::vector<std::string> get_actions_of(const std::string& state) {
+		auto result = std::vector<std::string>(m->probabilities[state].size());
+		std::transform(
+			m->probabilities[state].cbegin(),
+			m->probabilities[state].cend(),
+			result.begin(),
+			[](const auto& pair) {
+				return pair.first;
+			}
+		);
+		return result;
+	}
+
+};
+
+class scheduler_container {
+public:
+	using scheduler = std::map<std::string, std::size_t>;
+
+	scheduler sched;
+	std::map<std::string, std::vector<std::string>> available_actions_per_state;
+
+};
+
+std::size_t get_index(const std::vector<std::string>& str_vec, const std::string& s) {
+	for (std::size_t i{ 0 }; i < str_vec.size(); ++i) {
+		if (str_vec[i] == s) {
+			return i;
+		}
+	}
+	throw std::logic_error("String not contained in string vector.");
+}
+
+void optimize_scheduler(mdp& m, const std::vector<std::string>& ordered_variables) {
+	scheduler_container cont;
+
+	mdp_view view = mdp_view(m);
+
+	// fill quick table of available actions
+	for (auto state = m.states.cbegin(); state != m.states.cend(); ++state) {
+		cont.available_actions_per_state[*state] = view.get_actions_of(*state);
+		if (cont.available_actions_per_state[*state].empty() && !set_contains(m.targets, *state)) {
+			standard_logger()->error("There is some non target state which has no action enabled");
+			throw 0;//### fix this!
+		}
+	}
+
+	//+++++++++++
+
+	// select deterministically a start node for our optimization: select the first available action everywhere.
+	for (auto non_trap_state_paired_actions = cont.available_actions_per_state.cbegin();
+		non_trap_state_paired_actions != cont.available_actions_per_state.cend();
+		++non_trap_state_paired_actions
+		) {
+		if (!non_trap_state_paired_actions->second.empty()) {
+			cont.sched[non_trap_state_paired_actions->first] = 0;
+		}
+	}
+
+	// create matrix
+	linear_systems::matrix mat;
+	linear_systems::rational_vector rew;
+	for (const auto& var : ordered_variables) {
+		const auto& line_var_id{ mat.size() };
+		if (cont.available_actions_per_state[var].empty()) { // it is a target state
+			rew.emplace_back(0);
+			linear_systems::matrix_line line = { { std::make_pair(line_var_id, rational_type(1)) } };
+			mat.emplace_back(std::move(line));
+		}
+		else { // it is no target state
+			const auto& action_id{ cont.sched[var] };
+			const auto action{ cont.available_actions_per_state[var][action_id] };
+			rew.emplace_back(m.rewards[var][action]);
+			linear_systems::matrix_line line;
+			for (const auto& state_paired_rational : m.probabilities[var][action]) {
+				const auto& var_id{ get_index(ordered_variables, state_paired_rational.first) };
+				auto value{ state_paired_rational.second * rational_type(-1) };
+				if (var_id == line_var_id) value += rational_type(1);
+				line.push_back(std::make_pair(var_id, value));
+			}
+		}
+	}
+	// Px = rew
+	// target: xi = 0
+	// others: xj = Pk xk + r 
+	// .....->  (d_j - Pk) x = r
+	// 
+	linear_systems::id_vector unresolved;
+	linear_systems::id_vector resolved;
+	std::transform(
+		m.targets.begin(),
+		m.targets.end(),
+		std::back_inserter(resolved),
+		[&](const std::string& s) -> linear_systems::var_id { return get_index(ordered_variables, s); }
+	);
+	std::sort(resolved.begin(), resolved.end());
+
+	for (linear_systems::var_id i{ 0 }; i < mat.size(); ++i) {
+		unresolved.push_back(i);
+	}
+
+	auto new_end = std::copy_if(
+		unresolved.begin(),
+		unresolved.end(),
+		unresolved.begin(),
+		[&](const linear_systems::var_id& var) -> bool { 
+			/* not contained in resolved */
+			auto found = std::lower_bound(resolved.cbegin(), resolved.cend(), var);
+			return found == resolved.cend() || *found != var;
+		}
+	);
+	unresolved.erase(new_end, unresolved.end());
+
+	// solve matrix
+	solve_linear_system_dependency_order_optimized(mat, rew, unresolved, resolved);
+
+
+
+}
 
 int main(int argc, char* argv[])
 {
@@ -237,7 +362,8 @@ int main(int argc, char* argv[])
 	};
 
 	// create unfold-mdp
-	n = unfold(m, crinkle, threshold, delta_max);
+	std::vector<std::string> ordered_variables;
+	n = unfold(m, crinkle, threshold, delta_max, ordered_variables);
 	//#### will break if in m state names use underscore
 
 
@@ -248,6 +374,10 @@ int main(int argc, char* argv[])
 	auto rewards = linear_systems::rational_vector();
 	solve_linear_system_dependency_order_optimized(linear_systems::matrix(), rewards, linear_systems::id_vector(), linear_systems::id_vector());///####### only fo debug compile
 	//additional checks for our assumptions #####
+
+
+
+
 
 
 	// find an optimal det memless scheduler
