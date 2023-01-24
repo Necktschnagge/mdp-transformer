@@ -276,12 +276,20 @@ void optimize_scheduler(mdp& m, const std::vector<std::string>& ordered_variable
 				const auto action{ cont.available_actions_per_state[var][action_id] };
 				rew.emplace_back(m.rewards[var][action]);
 				linear_systems::matrix_line line;
+				bool extra_diagonal_entry{ true };
 				for (const auto& state_paired_rational : m.probabilities[var][action]) {
 					const auto& var_id{ get_index(ordered_variables, state_paired_rational.first) };
 					auto value{ state_paired_rational.second * rational_type(-1) };
-					if (var_id == line_var_id) value += rational_type(1);
+					if (var_id == line_var_id) {
+						value += rational_type(1);
+						extra_diagonal_entry = false;
+					}
 					line.push_back(std::make_pair(var_id, value));
 				}
+				if (extra_diagonal_entry) {
+					line.push_back(std::make_pair(line_var_id, 1));
+				}
+				mat.emplace_back(std::move(line));
 			}
 		}
 		// Px = rew
@@ -321,6 +329,11 @@ void optimize_scheduler(mdp& m, const std::vector<std::string>& ordered_variable
 
 		linear_systems::rational_vector current_solution = rew;
 
+		for (std::size_t i = 0; i < current_solution.size(); ++i) {
+			standard_logger()->trace(std::string("curr-sol:  ") + std::to_string(i) + "  :  " +
+				current_solution[i].numerator().str() + "/" + current_solution[i].denominator().str());
+		}
+
 		bool found_improvement{ false };
 
 		// improve the scheduler...
@@ -339,6 +352,9 @@ void optimize_scheduler(mdp& m, const std::vector<std::string>& ordered_variable
 					accummulated += state_paired_prob.second * current_solution[get_index(ordered_variables, state_paired_prob.first)];
 				}
 				if (accummulated > best_seen_value) {
+					standard_logger()->trace(std::string("improve valued from  ") +
+						best_seen_value.numerator().str() + "/" + best_seen_value.denominator().str() + "   to " +
+						accummulated.numerator().str() + "/" + accummulated.denominator().str());
 					select_action = action_id;
 					best_seen_value = accummulated;
 					found_improvement = true;

@@ -16,6 +16,17 @@ namespace linear_systems {
 	using matrix = std::vector<matrix_line>;
 }
 
+void print_mat(const linear_systems::matrix& mat, const linear_systems::rational_vector& r) {
+	for (std::size_t i = 0; i < mat.size(); ++i) {
+		standard_logger()->trace(std::to_string(i) + ":");
+		for (const auto& pair : mat[i]) {
+			standard_logger()->trace(std::string("     next:  [") + std::to_string(pair.first) + "] :   " + pair.second.numerator().str() + "/" + pair.second.denominator().str());
+		}
+		standard_logger()->trace(std::string("     rew:  ") + r[i].numerator().str() + "/" + r[i].denominator().str());
+	}
+}
+
+
 class linear_system_error : public std::logic_error {
 public:
 	template<class ...T>
@@ -148,6 +159,7 @@ inline void inline_normalize_resolved_line(
 */
 inline void resolve_x_j_in_line_i_using_line_j(
 	linear_systems::matrix& P_table, // lines are sorted and kept sorted
+	linear_systems::rational_vector& r,
 	linear_systems::var_id line_i,
 	linear_systems::var_id line_j,
 	linear_systems::matrix_line::iterator iter_on_x_j_inside_line_i
@@ -170,6 +182,8 @@ inline void resolve_x_j_in_line_i_using_line_j(
 	// P_table[line_i] -= equation_multiply_factor * "line_j" // -> coefficient of line_j in line_i will be zero.
 	matrix_line::iterator iter{ P_table[line_i].begin() };
 	matrix_line::iterator jter{ P_table[line_j].begin() };
+	r[line_i] -= r[line_j] * equation_multiply_factor;
+
 	matrix_line the_new_line_i;
 	while (true) {
 		if (iter == P_table[line_i].end()) {
@@ -409,7 +423,7 @@ rerun__solve_linear_system_dependency_order_optimized:
 					P[select_next_dependent_line].end(),
 					std::make_pair(stack_line, rational_type(0)),
 					compare_id_rational_pair);
-				
+
 				if (x_stack_line_in_select_next_dependent_line != P[select_next_dependent_line].end() && x_stack_line_in_select_next_dependent_line->first == stack_line) { // if line is a variable in select_next_dependent_line
 					if (x_stack_line_in_select_next_dependent_line->second == rational_type(0)) { // if there is some 0-entry, remove it.
 						P[select_next_dependent_line].erase(x_stack_line_in_select_next_dependent_line); // invalidates iterators on P_table[select_next_dependent_line]!
@@ -423,6 +437,7 @@ rerun__solve_linear_system_dependency_order_optimized:
 					}
 					resolve_x_j_in_line_i_using_line_j(
 						P,
+						r,
 						select_next_dependent_line,
 						stack_line,
 						x_stack_line_in_select_next_dependent_line);
@@ -438,6 +453,7 @@ rerun__solve_linear_system_dependency_order_optimized:
 			// resolve high_prio_select using select_next_dependent_line:
 			resolve_x_j_in_line_i_using_line_j(
 				P,
+				r,
 				high_prio_select,
 				select_next_dependent_line,
 				iter_of_next_dependent_inside_high_prio_select);
