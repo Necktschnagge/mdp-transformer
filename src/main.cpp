@@ -348,6 +348,14 @@ void optimize_scheduler(mdp& m, const std::vector<std::string>& ordered_variable
 		}
 
 		if (!found_improvement) {
+			standard_logger()->info("The following memoryless deterministic scheduler is optimal:");
+			for (const auto& decision : cont.sched) {
+				standard_logger()->info(std::string("At state  ") + decision.first + "  :  " + cont.available_actions_per_state[decision.first][decision.second]);
+			}
+			standard_logger()->info("The following expectations per state are optimal:");
+			for (std::size_t i = 0; i < current_solution.size(); ++i) {
+				standard_logger()->info(std::string("At state  ") + ordered_variables[i] + "  :  " + current_solution[i].numerator().str() + "/" + current_solution[i].denominator().str());
+			}
 			return;
 		}
 	}
@@ -403,15 +411,6 @@ int main(int argc, char* argv[])
 	standard_logger()->info("got unfolded mdp:");
 	standard_logger()->info(mdp_to_json(n).dump(3));
 
-	/// this is only compile check...
-	auto rewards = linear_systems::rational_vector();
-	solve_linear_system_dependency_order_optimized(linear_systems::matrix(), rewards, linear_systems::id_vector(), linear_systems::id_vector());///####### only fo debug compile
-	//additional checks for our assumptions #####
-
-
-
-
-
 
 	// find an optimal det memless scheduler
 	// 
@@ -425,12 +424,7 @@ int main(int argc, char* argv[])
 
 	// check for all nodes with multiple optimal solutions...
 
-
-
-
-
-
-
+	optimize_scheduler(n, ordered_variables);
 
 	standard_logger()->info("     DONE     ");
 	return 0;
