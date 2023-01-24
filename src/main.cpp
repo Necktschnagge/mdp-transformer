@@ -14,6 +14,10 @@ namespace feature_toogle {
 
 }
 
+bool set_contains(const std::set<std::string>& set, const std::string& s) {
+	return set.find(s) != set.cend();
+}
+
 std::set<std::string> calc_reachable_states(const mdp& m) {
 
 	std::set<std::string> reachable_states;
@@ -41,38 +45,122 @@ std::set<std::string> calc_reachable_states(const mdp& m) {
 			}
 		}
 	}
-	
+
 	return reachable_states;
 }
 
-bool check_mdp_constraints(const mdp& m) {
+bool check_mdp_constraints_and_simplify(mdp& m) {
 
+	// check for reachable states
 	std::set<std::string> reachable_states = calc_reachable_states(m);
-	
-	m.
-	
-		
 
+	const auto is_reachable{
+		[&](const std::string& s) -> bool {
+			return reachable_states.find(s) != reachable_states.cend();
+		}
+	};
 
-	// checking P>0(Finally target) for all states!
-
-	// 
-
-	//### put in all the requirements here!!!
-	try {
-		mdp_sanity::check("mdp_is_object",m.actions.size() > 0);
-
-
+	for (const auto& s : m.states) {
+		if (reachable_states.find(s) == reachable_states.cend()) {
+			standard_logger()->info(std::string("The following state is unreachable and is removed:   ") + s);
+		}
 	}
-	catch (mdp_sanity& e) {
-		standard_logger()->error(e.what());
-		return false;
+	m.states = reachable_states;
+
+	// remove unreachables from target
+	std::vector<decltype(m.targets.begin())> targets_to_remove;
+	for (auto iter = m.targets.begin(); iter != m.targets.end(); ++iter) {
+		if (reachable_states.find(*iter) == reachable_states.cend()) {
+			standard_logger()->info(std::string("The following state is an unreachable target state, will be removed:   ") + *iter);
+			targets_to_remove.push_back(iter);
+		}
 	}
+
+	for (const auto& foreign_iter : targets_to_remove) {
+		m.targets.erase(foreign_iter);
+	}
+
+	// remove unreachables from probability matrix
+	for (auto iter = m.probabilities.begin(); iter != m.probabilities.end();) {
+		if (reachable_states.find(iter->first) == reachable_states.cend()) {
+			auto del{ iter };
+			++iter;
+			m.probabilities.erase(del);
+		}
+		else {
+			++iter;
+		}
+	}
+
+	// remove unreachable from next states...
+	for (auto& state_paired_transitions : m.probabilities) {
+		for (auto& action_paired_distr : state_paired_transitions.second) {
+			for (auto iter = action_paired_distr.second.begin(); iter != action_paired_distr.second.end();) {
+				if (!is_reachable(iter->first)) {
+					auto del{ iter };
+					++iter;
+					action_paired_distr.second.erase(del);
+				}
+				else {
+					++iter;
+				}
+			}
+		}
+	}
+
+	// remove unreachable form rewards
+	for (auto iter = m.rewards.begin(); iter != m.rewards.end();) {
+		if (reachable_states.find(iter->first) == reachable_states.cend()) {
+			auto del{ iter };
+			++iter;
+			m.rewards.erase(del);
+		}
+		else {
+			++iter;
+		}
+	}
+
+	// check probability for reaching target = 1
+	
+	// first set of all states which reach under every scheduler target with positive prob.
+	// then we have this ones that can never reach target. -> X
+	// find all states that can reach X with positive probability. There should be no such states.
+
+	/*
+	std::set<std::string> eventually_target = m.targets;
+	bool rerun{ true };
+	while (rerun) {
+		rerun = false;
+		for (auto& state_paired_transitions : m.probabilities) {
+			// check if state_paired_transitions.first is eventually_target;
+			if (!set_contains(eventually_target, state_paired_transitions.first)) {
+				// check: for each action there is a probability 
+				for (auto& action_paired_distr : state_paired_transitions.second) {
+					for (auto iter = action_paired_distr.second.begin(); iter != action_paired_distr.second.end();) {
+						if (!is_reachable(iter->first)) {
+							auto del{ iter };
+							++iter;
+							action_paired_distr.second.erase(del);
+						}
+						else {
+							++iter;
+						}
+					}
+				}
+			}
+		}
+	}
+	*/
+	
+	//check poisitive cycles inside delta_max #####
+	
+	// check for integer rewards. ######
+	
 	return true;
 }
 
-std::map<std::string, rational_type> calc_delta_max_state_wise(const mdp& m) {
 
+std::map<std::string, rational_type> calc_delta_max_state_wise(const mdp& m) {
 
 	std::map<std::string, rational_type> result;
 
@@ -114,6 +202,9 @@ int main(int argc, char* argv[])
 	if (argc > 1) {
 		//on server
 		(void)argv;
+		standard_logger()->info(argv[1]);
+		standard_logger()->info("Running on server. Doing nothing for now.");
+		return 0;
 	}
 
 
@@ -149,7 +240,7 @@ int main(int argc, char* argv[])
 	n = unfold(m, crinkle, threshold, delta_max);
 	//#### will break if in m state names use underscore
 
-	
+
 	standard_logger()->info("got unfolded mdp:");
 	standard_logger()->info(mdp_to_json(n).dump(3));
 
