@@ -51,7 +51,16 @@ stages:
        - script: git submodule update --init --recursive
          displayName: "Init Git Submodules"
          condition: succeeded()
-       - script: cmake -S . -B ./build/
+       - script: sudo apt-get update && sudo apt-get install libboost-all-dev libtbb-dev
+         displayName: "Linux: Install Boost"
+         condition: and(succeeded(), eq( variables['Agent.OS'], 'Linux' ))
+       - script: brew install boost
+         displayName: "Mac: Install Boost"
+         condition: and(succeeded(), eq( variables['Agent.OS'], 'Darwin' ))
+       - script:  choco install boost-msvc-14.2 #nuget install boost_regex-vc142 -Version 1.76.0
+         displayName: "Windows: Install Boost"#
+         condition: and(succeeded(), eq( variables['Agent.OS'], 'Windows_NT'))
+        - script: cmake -S . -B ./build/
          displayName: "CMake: Create Project"
          condition: succeeded()
        - script: cmake --build ./build
