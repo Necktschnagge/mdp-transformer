@@ -60,7 +60,7 @@ stages:
        - script:  choco install boost-msvc-14.2 #nuget install boost_regex-vc142 -Version 1.76.0
          displayName: "Windows: Install Boost"#
          condition: and(succeeded(), eq( variables['Agent.OS'], 'Windows_NT'))
-        - script: cmake -S . -B ./build/
+       - script: cmake -S . -B ./build/
          displayName: "CMake: Create Project"
          condition: succeeded()
        - script: cmake --build ./build
