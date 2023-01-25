@@ -332,9 +332,11 @@ void optimize_scheduler(mdp& m, const std::vector<std::string>& ordered_variable
 		);
 		unresolved.erase(new_end, unresolved.end());
 
+		/*
 		for (const auto& decision : cont.sched) {
-			standard_logger()->info(std::string("At state  ") + decision.first + "  :  " + cont.available_actions_per_state[decision.first][decision.second]);
+			standard_logger()->trace(std::string("At state  ") + decision.first + "  :  " + cont.available_actions_per_state[decision.first][decision.second]);
 		}
+		*/
 		// solve matrix
 		solve_linear_system_dependency_order_optimized(mat, rew, unresolved, resolved);
 
@@ -365,9 +367,14 @@ void optimize_scheduler(mdp& m, const std::vector<std::string>& ordered_variable
 					accummulated += state_paired_prob.second * current_solution[get_index(ordered_variables, state_paired_prob.first)];
 				}
 				if (accummulated > best_seen_value) {
+					/*
 					standard_logger()->trace(std::string("improve valued from  ") +
 						best_seen_value.numerator().str() + "/" + best_seen_value.denominator().str() + "   to " +
 						accummulated.numerator().str() + "/" + accummulated.denominator().str());
+					*/
+					standard_logger()->trace(std::string("improve decision at   ") + *var + "   ::   " +
+						cont.available_actions_per_state[*var][select_action] + "   -->>   " +cont.available_actions_per_state[*var][action_id] 
+						+ ":     " + best_seen_value.denominator().str());
 					select_action = action_id;
 					best_seen_value = accummulated;
 					found_improvement = true;
