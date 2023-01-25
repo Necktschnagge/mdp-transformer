@@ -340,10 +340,12 @@ void optimize_scheduler(mdp& m, const std::vector<std::string>& ordered_variable
 
 		linear_systems::rational_vector current_solution = rew;
 
+		/*
 		for (std::size_t i = 0; i < current_solution.size(); ++i) {
 			standard_logger()->trace(std::string("curr-sol:  ") + std::to_string(i) + "  :  " +
 				current_solution[i].numerator().str() + "/" + current_solution[i].denominator().str());
 		}
+		*/
 
 		bool found_improvement{ false };
 
@@ -385,6 +387,7 @@ void optimize_scheduler(mdp& m, const std::vector<std::string>& ordered_variable
 			}
 			return;
 		}
+		standard_logger()->info("Found a scheduler improvement. Rerun stepwise improvement.");
 	}
 }
 
