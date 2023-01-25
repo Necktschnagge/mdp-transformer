@@ -421,7 +421,7 @@ int main(int argc, char* argv[])
 
 	mdp n;
 
-	rational_type threshold{ 12 };
+	rational_type threshold{ 16 };
 	const rational_type factor = 5;
 	const auto crinkle =
 		[&threshold, &factor](const rational_type& x) -> rational_type {
