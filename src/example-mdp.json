@@ -59,7 +59,7 @@
   "initial": "init",
   "rewards": {
     "init": {
-      "unique": "-40"
+      "unique": "-10"
     },
     "s0": {
       "a": "1",
