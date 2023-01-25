@@ -174,14 +174,22 @@ std::map<std::string, rational_type> calc_delta_max_state_wise(const mdp& m) {
 	for (bool continue_loop = true; continue_loop;) {
 		continue_loop = false;
 		for (const auto& state : m.states) {
-			for (const auto& action_tree : m.probabilities.at(state)) {
-				for (const auto& next_state_pair : m.probabilities.at(state).at(action_tree.first)) {
-					rational_type update = std::min(result[state], result[next_state_pair.first] + m.rewards.at(state).at(action_tree.first));
-					if (result[state] != update)
-						continue_loop = true;
-					result[state] = update;
-					standard_logger()->trace(std::string("UPDATE delta_m for  >" + state + "<  :" + update.numerator().str() + "/" + update.denominator().str()));
+			//#### check again safety of all ".at(...)"
+			try {
+				const auto& actions{ m.probabilities.at(state) }; // try is only supposed top catch this!! there are more .at()...
+
+				for (const auto& action_tree : actions) {
+					for (const auto& next_state_pair : m.probabilities.at(state).at(action_tree.first)) {
+						rational_type update = std::min(result[state], result[next_state_pair.first] + m.rewards.at(state).at(action_tree.first));
+						if (result[state] != update)
+							continue_loop = true;
+						result[state] = update;
+						standard_logger()->trace(std::string("UPDATE delta_m for  >" + state + "<  :" + update.numerator().str() + "/" + update.denominator().str()));
+					}
 				}
+			}
+			catch (const std::out_of_range&) {
+
 			}
 			// separate treatment for target states?
 		}
@@ -324,6 +332,9 @@ void optimize_scheduler(mdp& m, const std::vector<std::string>& ordered_variable
 		);
 		unresolved.erase(new_end, unresolved.end());
 
+		for (const auto& decision : cont.sched) {
+			standard_logger()->info(std::string("At state  ") + decision.first + "  :  " + cont.available_actions_per_state[decision.first][decision.second]);
+		}
 		// solve matrix
 		solve_linear_system_dependency_order_optimized(mat, rew, unresolved, resolved);
 
@@ -411,11 +422,12 @@ int main(int argc, char* argv[])
 	mdp n;
 
 	rational_type threshold{ 12 };
+	const rational_type factor = 5;
 	const auto crinkle =
-		[&threshold](const rational_type& x) -> rational_type {
+		[&threshold, &factor](const rational_type& x) -> rational_type {
 		return (x < threshold) ?
-			rational_type(2) * x
-			: x + threshold;
+			factor * x
+			: x + (factor - rational_type(1)) * threshold;
 	};
 
 	// create unfold-mdp

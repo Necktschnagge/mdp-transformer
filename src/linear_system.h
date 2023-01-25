@@ -167,7 +167,8 @@ inline void resolve_x_j_in_line_i_using_line_j(
 	using namespace linear_systems;
 
 	const auto iter_on_x_j_inside_line_j = std::lower_bound(P_table[line_j].begin(), P_table[line_j].end(), std::make_pair(line_j, rational_type()), compare_id_rational_pair);
-
+	standard_logger()->info(std::string("########################### with i, j:   ") + std::to_string(line_i) + "   " + std::to_string(line_j));
+	print_mat(P_table, r);
 	if (feature_toggle::LINEAR_SYSTEMS_DEBUG_CHECKS) {
 		if (iter_on_x_j_inside_line_j == P_table[line_j].end()) {
 			throw linear_system_error("Should apply resolve_x_j_in_line_i_using_line_j but x_j in line_j does not exist");
@@ -414,6 +415,15 @@ rerun__solve_linear_system_dependency_order_optimized:
 					throw linear_system_error("Algorithm Design error: We choose a dependent line that was already chosen some time before.");
 				}
 			}
+			standard_logger()->trace("+++++++++++++++ high_prio:");
+			standard_logger()->trace(high_prio_select);
+			standard_logger()->trace("+++++++++++++++ new_dependent_select:");
+			standard_logger()->trace(select_next_dependent_line);
+			standard_logger()->trace("+++++++++++++++ resolve_stack:");
+			for (const auto& stack_line : resolve_stack) {
+				standard_logger()->trace(stack_line);
+			}
+
 
 			for (const auto& stack_line : resolve_stack) {
 

@@ -71,6 +71,8 @@ public:
 
 };
 
+//#### mdp sanity checks should stop further calculations!
+
 template<class _Modification>
 inline mdp unfold(const mdp& m, const _Modification& func, rational_type threshold, const std::map<std::string, rational_type>& delta_max, std::vector<std::string>& ordered_variables) {
 
