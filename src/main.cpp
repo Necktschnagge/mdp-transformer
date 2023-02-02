@@ -2,6 +2,7 @@
 #include "utility.h"
 #include "linear_system.h"
 #include "mdp_ops.h"
+#include "feature_toggle.h"
 
 #include <boost/multiprecision/cpp_int.hpp>
 #include <boost/rational.hpp>
@@ -159,47 +160,6 @@ bool check_mdp_constraints_and_simplify(mdp& m) {
 	return true;
 }
 
-
-std::map<std::string, rational_type> calc_delta_max_state_wise(const mdp& m) {
-
-	std::map<std::string, rational_type> result;
-
-	std::map<std::string, bool> needs_update;
-
-	for (const auto& state : m.states) {
-		result[state] = rational_type(0);
-		needs_update[state] = true;
-	}
-
-	for (bool continue_loop = true; continue_loop;) {
-		continue_loop = false;
-		for (const auto& state : m.states) {
-			//#### check again safety of all ".at(...)"
-			try {
-				const auto& actions{ m.probabilities.at(state) }; // try is only supposed top catch this!! there are more .at()...
-
-				for (const auto& action_tree : actions) {
-					for (const auto& next_state_pair : m.probabilities.at(state).at(action_tree.first)) {
-						rational_type update = std::min(result[state], result[next_state_pair.first] + m.rewards.at(state).at(action_tree.first));
-						if (result[state] != update)
-							continue_loop = true;
-						result[state] = update;
-						standard_logger()->trace(std::string("UPDATE delta_m for  >" + state + "<  :" + update.numerator().str() + "/" + update.denominator().str()));
-					}
-				}
-			}
-			catch (const std::out_of_range&) {
-
-			}
-			// separate treatment for target states?
-		}
-	}
-
-	for (auto& pair : result) // convert into positive values!
-		pair.second *= rational_type(-1);
-
-	return result;
-}
 
 class mdp_view {
 
@@ -373,7 +333,7 @@ void optimize_scheduler(mdp& m, const std::vector<std::string>& ordered_variable
 						accummulated.numerator().str() + "/" + accummulated.denominator().str());
 					*/
 					standard_logger()->trace(std::string("improve decision at   ") + *var + "   ::   " +
-						cont.available_actions_per_state[*var][select_action] + "   -->>   " +cont.available_actions_per_state[*var][action_id] 
+						cont.available_actions_per_state[*var][select_action] + "   -->>   " + cont.available_actions_per_state[*var][action_id]
 						+ ":     " + best_seen_value.denominator().str());
 					select_action = action_id;
 					best_seen_value = accummulated;
@@ -397,22 +357,107 @@ void optimize_scheduler(mdp& m, const std::vector<std::string>& ordered_variable
 		standard_logger()->info("Found a scheduler improvement. Rerun stepwise improvement.");
 	}
 }
+class application_errors {
+public:
+	static constexpr std::size_t count_error_codes{ 8 };
+	inline static const std::array<std::string_view, count_error_codes> application_error_messages{ {
+		std::string_view("Ordinary EXIT"), // 0
+		std::string_view("Internal error: called with ZERO arguments") , // 1
+		std::string_view("Call error: called with ZERO arguments"), // 2
+		std::string_view("Could not open and parse all files correctly"), // 3
+		std::string_view("Could not merge json files"), // 4
+		std::string_view("Could build up an MDP from json files"), // 5
+		std::string_view("Found a negative loop in an MDP"), // 6
+		std::string_view("Fatal internal error") // 7
+		}
+	};
 
-int main(int argc, char* argv[])
-{
-	init_logger();
 
-	if (argc > 1) {
-		//on server
-		(void)argv;
-		standard_logger()->info(argv[1]);
-		standard_logger()->info("Running on server. Doing nothing for now.");
-		return 0;
+};
+
+int run_starting_from_merged_json(const nlohmann::json& merged_json) {
+
+	standard_logger()->info("Checking for validness of MDP (json -> MDP)...");
+
+	mdp m;
+
+	try {
+		check_valid_mdp(merged_json, m);
+	}
+	catch (mdp_sanity& e) {
+		standard_logger()->error(e.what());
+		const std::size_t error_code{ 5 };
+		standard_logger()->error(application_errors::application_error_messages[error_code].data());
+		return error_code;
+	}
+
+	standard_logger()->info("Successfully build up MDP from json!");
+
+	//## check for ill-formed task !!!
+
+	standard_logger()->info("Check for certain MDP properties...");
+
+	//##check for  every state is reachable       "no-unreachable-states": true,
+	//       "reaching-target-with-probability-1": true,
+	//       "only-positive-cycles": true
+
+
+	std::map<std::string, rational_type> delta_max;
+	try {
+		delta_max = calc_delta_max_state_wise(m, ignore_non_positive_loops_on_target_states); //##check for negative loops!!!
+	}
+	catch (const found_negative_loop& e) {
+		standard_logger()->error(e.what());
+		const std::size_t error_code{ 6 };
+		standard_logger()->error(application_errors::application_error_messages[error_code].data());
+		return error_code;
+	}
+	catch (const calc_delta_max_error& e) {
+		standard_logger()->error(e.what());
+		const std::size_t error_code{ 7 };
+		standard_logger()->error(application_errors::application_error_messages[error_code].data());
+		return error_code;
 	}
 
 
+
+	mdp n;
+
+	rational_type threshold{ 10 };
+	const rational_type factor = 1000;
+	const auto crinkle =
+		[&threshold, &factor](const rational_type& x) -> rational_type {
+		return (x < threshold) ?
+			factor * x
+			: x + (factor - rational_type(1)) * threshold;
+	};
+
+	// create unfold-mdp
+	std::vector<std::string> ordered_variables;
+	n = unfold(m, crinkle, threshold, delta_max, ordered_variables);
+	//#### will break if in m state names use underscore
+
+
+	standard_logger()->info("got unfolded mdp:");
+	standard_logger()->info(mdp_to_json(n).dump(3));
+
+	//#### calc all optimal scheduers!!!
+
+	// find an optimal det memless scheduler
+	// 
+	// select a scheduler randomly..
+	// A:
+	// MDP + scheduler -> LGS
+	// solve LGS...
+	// locally select an optimal scheduler..
+	// loop -> A, but
+	// if there was no better sched decision found anywhere, stop.
+
+	// check for all nodes with multiple optimal solutions...
+
+	optimize_scheduler(n, ordered_variables);
+
 	// json...
-	nlohmann::json input = load_json("../../src/example-mdp.json");
 
 	standard_logger()->trace(input.dump(3));
 
@@ -464,6 +509,75 @@ int main(int argc, char* argv[])
 
 	optimize_scheduler(n, ordered_variables);
 
-	standard_logger()->info("     DONE     ");
+
+
+	standard_logger()->info(application_errors::application_error_messages[0]); // no error
 	return 0;
+}
+
+int load_jsons_and_run(const std::vector<std::string>& arguments) {
+	std::vector<nlohmann::json> jsons;
+
+	// open files and parse as json
+	for (std::size_t i{ 0 }; i < arguments.size(); ++i) {
+		try {
+			jsons.push_back(load_json<true>(arguments[i]));
+			standard_logger()->trace(std::string("file  ") + std::to_string(i) + jsons.back().dump(3));
+		}
+		catch (const nlohmann::json& error) {
+			const std::size_t error_code{ 3 };
+			standard_logger()->error(application_errors::application_error_messages[error_code].data());
+			standard_logger()->error(std::string("file:") + arguments[i]);
+			return error_code;
+		}
+	}
+
+	nlohmann::json merged_json;
+
+	// merge all json files
+	try {
+		merged_json = merge_json_objects(jsons);
+	}
+	catch (const json_logic_error& e) {
+		standard_logger()->error(e.what());
+		const std::size_t error_code{ 4 };
+		standard_logger()->error(application_errors::application_error_messages[error_code].data());
+		return error_code;
+	}
+
+	return run_starting_from_merged_json(merged_json);
+}
+
+int main(int argc, char* argv[])
+{
+	init_logger();
+
+	if (argc < 1) {
+		(void)argv;
+		// There should be >= 1 argument: the path to the executable
+		const std::size_t error_code{ 1 };
+		standard_logger()->error(application_errors::application_error_messages[error_code].data());
+		standard_logger()->error(std::to_string(argc));
+		return error_code;
+	}
+
+	if (argc == 1) {
+		if constexpr (feature_toggle::RUN_ON_ZERO_ARGUMENTS) {
+			const auto example_path = std::string("../../src/example-mdp.json");
+			return load_jsons_and_run(std::vector<std::string>{example_path});
+		}
+		const std::size_t error_code{ 2 };
+		standard_logger()->error(application_errors::application_error_messages[error_code].data());
+		standard_logger()->info(argv[0]);
+		return error_code;
+	}
+
+	std::vector<std::string> arguments;
+	standard_logger()->info("Called mdp-transformer using the following arguments:");
+	for (int i = 0; i < argc; ++i) {
+		arguments.emplace_back(argv[i]);
+		standard_logger()->info(std::to_string(i) + "   :   " + arguments.back());
+	}
+
+	return load_jsons_and_run(arguments);
 }

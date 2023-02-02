@@ -40,6 +40,23 @@ public:
 	std::map<std::string, std::map<std::string, rational_type>> rewards;
 	std::set<std::string> targets;
 
+
+	rational_type min_reward() const {
+		std::vector<rational_type> values;
+		for (const auto& state_paired_rewards : rewards) {
+			for (const auto& action_paired_reward : state_paired_rewards.second) {
+				values.push_back(action_paired_reward.second);
+			}
+		}
+		if (values.empty())
+			return rational_type(0);
+		rational_type min{values.front()};
+		for (const auto& v : values) {
+			if (v < min)
+				min = v;
+		}
+		return min;
+	}
 };
 
 class mdp_sanity : public std::logic_error {
@@ -55,7 +72,8 @@ public:
 	}
 };
 
-bool check_valid_mdp(const nlohmann::json& input, mdp& fill_in);
+
+void check_valid_mdp(const nlohmann::json& input, mdp& fill_in);
 
 class further_expand_record {
 public:
@@ -158,4 +176,54 @@ inline mdp unfold(const mdp& m, const _Modification& func, rational_type thresho
 
 nlohmann::json mdp_to_json(const mdp& m);
 
+inline std::map<std::string, rational_type> calc_delta_max_state_wise(const mdp& m, bool ignore_target_states) {
 
+	std::map<std::string, rational_type> result;
+
+	for (const auto& state : m.states) {
+		result[state] = rational_type(0);
+	}
+
+	if (ignore_target_states) {
+		for (const auto& target : m.targets) {
+		}
+	}
+
+	// We need to check for negative loops here.
+	// If and only if we every see a delta of - min_reward * number_of_states, there is some negative loop.
+	const rational_type negative_loop_delta_threshold{ rational_type(m.states.size()) * m.min_reward() };
+
+	bool continue_loop = true;
+	while (continue_loop) {
+		continue_loop = false;
+		for (const auto& state : m.states) {
+			if (ignore_target_states && set_contains(m.targets, state)) {
+				continue;
+			}
+			try {
+				const auto& actions{ m.probabilities.at(state) }; // building MDP ensures an entry for every state, even if left in json
+
+				for (const auto& action_tree : actions) {
+					for (const auto& next_state_pair : action_tree.second) {
+						rational_type update = std::min(result[state], result[next_state_pair.first] + m.rewards.at(state).at(action_tree.first)); // building MDP ensures an entry for every state,action, even if left in json
+						if (result[state] != update)
+							continue_loop = true;
+						result[state] = update;
+						if (update < negative_loop_delta_threshold) {
+							throw found_negative_loop("Found negative loop while determining delta max.");
+						}
+						standard_logger()->trace(std::string("UPDATE delta_m for  >" + state + "<  :" + update.numerator().str() + "/" + update.denominator().str()));
+					}
+				}
+			}
+			catch (const std::out_of_range&) {
+				throw calc_delta_max_error("Fatal internal error: The MDP that was build internally from json does not meet a constraint that is required for calculating delta max. Probably some out-of-range on a map occureed.");
+			}
+		}
+	}
+
+	for (auto& pair : result) // convert into positive values!
+		pair.second *= rational_type(-1);
+
+	return result;
+}

@@ -46,5 +46,19 @@
   },
   "targets": [
     "s2"
-  ]
+  ],
+
+  "task": {
+    "checks": {
+      "no-unreachable-states": true,
+      "reaching-target-with-probability-1": true,
+      "only-positive-cycles": true,
+      "ignore-non-positive-cycles-on-target-states": true
+    },
+    "calc": {
+      "mode": "crinkle",
+      "t": "12",
+      "r": "3"
+    }
+  }
 }
