@@ -432,7 +432,7 @@ int main(int argc, char* argv[])
 	mdp n;
 
 	rational_type threshold{ 10 };
-	const rational_type factor = 5;
+	const rational_type factor = 1000;
 	const auto crinkle =
 		[&threshold, &factor](const rational_type& x) -> rational_type {
 		return (x < threshold) ?
