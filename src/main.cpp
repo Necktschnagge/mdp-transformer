@@ -359,7 +359,7 @@ void optimize_scheduler(mdp& m, const std::vector<std::string>& ordered_variable
 }
 class application_errors {
 public:
-	static constexpr std::size_t count_error_codes{ 8 };
+	static constexpr std::size_t count_error_codes{ 11 };
 	inline static const std::array<std::string_view, count_error_codes> application_error_messages{ {
 		std::string_view("Ordinary EXIT"), // 0
 		std::string_view("Internal error: called with ZERO arguments") , // 1
@@ -368,12 +368,164 @@ public:
 		std::string_view("Could not merge json files"), // 4
 		std::string_view("Could build up an MDP from json files"), // 5
 		std::string_view("Found a negative loop in an MDP"), // 6
-		std::string_view("Fatal internal error") // 7
+		std::string_view("Fatal internal error"), // 7
+		std::string_view("Json entry for task not valid"), // 8
+		std::string_view("Found unreachable state(s)"), // 9
+		std::string_view("Found state(s) where reaching target is not guaranteed") // 10
 		}
 	};
 
 
 };
+
+void check_task_okay(const nlohmann::json& merged_json) {
+
+	// check for "task:"
+	json_task_error::check("merged_json_is_object", merged_json.is_object());
+	json_task_error::check("merged_containes_key_task", merged_json.contains(keywords::task));
+
+	// check for "checks:"
+	const auto& task_json{ merged_json.at(keywords::task) };
+	json_task_error::check("task_contains_checks", task_json.contains(keywords::checks::checks));
+	const auto& checks_json{ task_json.at(keywords::checks::checks) };
+	json_task_error::check("checks_contain_no_unreachable_states", checks_json.contains(keywords::checks::no_unreachable_states));
+	json_task_error::check("checks_contain_no_unreachable_states_bool", checks_json.at(keywords::checks::no_unreachable_states).is_boolean());
+	json_task_error::check("checks_contain_only_positive_cycles", checks_json.contains(keywords::checks::only_positive_cycles));
+	json_task_error::check("checks_contain_only_positive_cycles_bool", checks_json.at(keywords::checks::only_positive_cycles).is_boolean());
+	json_task_error::check("checks_contain_reaching_target_with_probability_1", checks_json.contains(keywords::checks::reaching_target_with_probability_1));
+	json_task_error::check("checks_contain_reaching_target_with_probability_1_bool", checks_json.at(keywords::checks::reaching_target_with_probability_1).is_boolean());
+	json_task_error::check("checks_contain_ignore_non_positive_cycles_on_target_states", checks_json.contains(keywords::checks::ignore_non_positive_cycles_on_target_states));
+	json_task_error::check("checks_contain_ignore_non_positive_cycles_on_target_states_bool", checks_json.at(keywords::checks::ignore_non_positive_cycles_on_target_states).is_boolean());
+
+	// check for "calc:"
+	json_task_error::check("merged_containes_key_calc", merged_json.contains(keywords::calc));
+	const auto& calc_json{ task_json.at(keywords::calc) };
+
+}
+
+void remove_unreachable_states(mdp& m, bool error_on_exists_unreachable_state) {
+	std::string& initial_state{ m.initial };
+
+	std::vector<std::string> reachables;
+	reachables.push_back(initial_state);
+
+	std::size_t next_expand{ 0 };
+
+	while (next_expand < reachables.size()) {
+		auto& actions_paired_distr{ m.probabilities[reachables[next_expand]] };
+		for (auto& action_paired_distr : actions_paired_distr) {
+		again_inner_loop:
+			for (auto next_state_paired_probability = action_paired_distr.second.begin(); next_state_paired_probability != action_paired_distr.second.end(); ++next_state_paired_probability) {
+				if (next_state_paired_probability->second != rational_type(0)) {
+					auto& next_s{ next_state_paired_probability->first };
+					auto found = std::find(
+						reachables.cbegin(),
+						reachables.cend(),
+						next_s
+					);
+					if (found == reachables.cend()) {
+						reachables.push_back(next_s);
+					}
+				}
+				else {
+					///#### log that a zero prob- transition was found
+					action_paired_distr.second.erase(next_state_paired_probability);
+					goto again_inner_loop; // because of iterator invalidation!!!
+				}
+			}
+		}
+		++next_expand;
+	}
+
+	std::vector<std::string> unreachables;
+
+	std::sort(reachables.begin(), reachables.end());
+	auto iter = reachables.cbegin();
+	for (const auto& state : m.states) {
+		if (iter == reachables.cend()) {
+			unreachables.push_back(state);
+		}
+		if (state == *iter) {
+			++iter;
+			continue;
+		}
+		if (state < *iter) {
+			unreachables.push_back(state);
+			continue;
+		}
+		if (*iter < state) {
+			++iter;
+			//## this is an internal error
+			continue;
+		}
+	}
+	if (!unreachables.empty()) {
+		for (auto& state : unreachables) {
+			if (error_on_exists_unreachable_state) {
+				standard_logger()->error("Found unreachable states:  ");
+				standard_logger()->error(std::string(".....") + state);
+			}
+			else {
+				standard_logger()->warn("Found unreachable states:  ");
+				standard_logger()->warn(std::string(".....") + state);
+			}
+		}
+		if (error_on_exists_unreachable_state)
+			throw found_unreachable_state(std::string("Found unreachable states:   ") + std::to_string(unreachables.size()));
+	}
+
+	// remove the unreachable states:
+	for (const auto& state : unreachables) {
+		m.states.erase(state);
+		m.targets.erase(state);
+		m.probabilities.erase(state); // next states already removed:: either probability 0 or exists only on right side of another unreachable state
+		m.rewards.erase(state);
+	}
+}
+
+bool check_reaching_target_is_guaranteed(mdp& m) {
+	std::map<std::string, bool> prob_to_target_is_positive;
+	std::map<std::string, bool> is_target;
+	for (const auto& state : m.states) {
+		prob_to_target_is_positive[state] = false;
+	}
+	for (const auto& state : m.targets) {
+		prob_to_target_is_positive[state] = true;
+	}
+	is_target = prob_to_target_is_positive;
+
+	bool has_changes{ true };
+	while (has_changes) {
+		has_changes = false;
+
+		for (auto& pair : prob_to_target_is_positive) {
+			if (pair.second == true)
+				continue;
+			const bool update = std::accumulate(
+				m.probabilities.at(pair.first).cbegin(),
+				m.probabilities.at(pair.first).cend(),
+				!m.probabilities.at(pair.first).empty(),
+				[&](const std::pair<std::string, std::map<std::string, rational_type>>& action_paired_distr, bool b) {
+					return b && std::accumulate(action_paired_distr.second.cbegin(), action_paired_distr.second.cend(), false,
+						[&](const std::pair<std::string, rational_type>& next_state_prob, bool inner_b) {
+							return inner_b || prob_to_target_is_positive[next_state_prob.first];
+						});
+				}
+			);
+			if (update)
+				has_changes = true;
+			pair.second = update;
+		}
+	}
+	bool found_error{ false };
+	for (const auto& pair : prob_to_target_is_positive) {
+		if (pair.second == false) {
+			standard_logger()->error(std::string("Found a state from which you cannot reach a target:   ") + pair.first);
+			found_error = true;
+		}
+	}
+	return !found_error;
+}
 
 int run_starting_from_merged_json(const nlohmann::json& merged_json) {
 
@@ -393,11 +545,51 @@ int run_starting_from_merged_json(const nlohmann::json& merged_json) {
 
 	standard_logger()->info("Successfully build up MDP from json!");
 
-	//## check for ill-formed task !!!
+	try {
+		check_task_okay(merged_json);
+	}
+	catch (const json_task_error& e) {
+		standard_logger()->error(e.what());
+		const std::size_t error_code{ 8 };
+		standard_logger()->error(application_errors::application_error_messages[error_code].data());
+		return error_code;
+	}
 
 	standard_logger()->info("Check for certain MDP properties...");
 
-	//##check for  every state is reachable       "no-unreachable-states": true,
+	const bool task_checks_no_unreachable_states{
+		merged_json[keywords::task][keywords::checks::checks][keywords::checks::no_unreachable_states]
+	};
+	const bool task_checks_reaching_target_with_probability_1{
+		merged_json[keywords::task][keywords::checks::checks][keywords::checks::reaching_target_with_probability_1]
+	};
+	const bool task_checks_no_unreachable_states{
+		merged_json[keywords::task][keywords::checks::checks][keywords::checks::no_unreachable_states]
+	};
+
+	// check:no unreachable states / remove unreachable states and their transitions / rewards....
+	// also removes 0-probability transitions!!!
+	try {
+		remove_unreachable_states(m, task_checks_no_unreachable_states);
+	}
+	catch (const found_unreachable_state& e) {
+		standard_logger()->error(e.what());
+		const std::size_t error_code{ 9 };
+		standard_logger()->error(application_errors::application_error_messages[error_code].data());
+		return error_code;
+	}
+
+	if (!task_checks_reaching_target_with_probability_1) {
+		standard_logger()->warn("Skipping reachable target check!");
+	}
+	else {
+		if (!check_reaching_target_is_guaranteed(m)) {
+			const std::size_t error_code{ 10 };
+			standard_logger()->error(application_errors::application_error_messages[error_code].data());
+			return error_code;
+		}
+	}
+
 	//       "reaching-target-with-probability-1": true,
 	//       "only-positive-cycles": true
 

@@ -31,63 +31,11 @@ inline bool sets_disjoint(IteratorA a_begin, IteratorA a_end, IteratorB b_begin,
 }
 
 
-class mdp {
-public:
-	std::set<std::string> states;
-	std::set<std::string> actions;
-	std::map<std::string, std::map<std::string, std::map<std::string, rational_type>>> probabilities;
-	std::string initial;
-	std::map<std::string, std::map<std::string, rational_type>> rewards;
-	std::set<std::string> targets;
-
-
-	rational_type min_reward() const {
-		std::vector<rational_type> values;
-		for (const auto& state_paired_rewards : rewards) {
-			for (const auto& action_paired_reward : state_paired_rewards.second) {
-				values.push_back(action_paired_reward.second);
-			}
-		}
-		if (values.empty())
-			return rational_type(0);
-		rational_type min{values.front()};
-		for (const auto& v : values) {
-			if (v < min)
-				min = v;
-		}
-		return min;
-	}
-};
-
-class mdp_sanity : public std::logic_error {
-
-public:
-
-	template <class T>
-	mdp_sanity(const T& arg) : std::logic_error(arg) {}
-
-	template <class T>
-	static void check(const T& message, bool check_result) {
-		if (!check_result) throw mdp_sanity(message);
-	}
-};
 
 
 void check_valid_mdp(const nlohmann::json& input, mdp& fill_in);
 
-class further_expand_record {
-public:
-	std::string new_state_name;
-	std::string old_state_name;
-	rational_type accumulated_reward;
 
-	further_expand_record(const std::string& old_state_name, rational_type accumulated_reward, const std::string& new_state_name) :
-		new_state_name(new_state_name),
-		old_state_name(old_state_name),
-		accumulated_reward(accumulated_reward)
-	{}
-
-};
 
 //#### mdp sanity checks should stop further calculations!
 
