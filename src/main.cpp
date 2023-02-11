@@ -675,7 +675,7 @@ int run_starting_from_merged_json(const nlohmann::json& merged_json) {
 			standard_logger()->error(application_errors::application_error_messages[error_code].data());
 			return error_code;
 		}
-		auto c = crinkle::crinkle(r, t);
+		const auto c{ crinkle(r, t) };
 
 		mdp n;
 		std::vector<std::string> ordered_variables;
