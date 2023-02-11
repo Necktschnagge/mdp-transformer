@@ -771,7 +771,8 @@ int main(int argc, char* argv[])
 
 	std::vector<std::string> arguments;
 	standard_logger()->info("Called mdp-transformer using the following arguments:");
-	for (int i = 0; i < argc; ++i) {
+	standard_logger()->info(std::to_string(0) + "   :   " + argv[0]);
+	for (int i = 1; i < argc; ++i) {
 		arguments.emplace_back(argv[i]);
 		standard_logger()->info(std::to_string(i) + "   :   " + arguments.back());
 	}
