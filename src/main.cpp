@@ -10,15 +10,6 @@
 #include <nlohmann/json.hpp>
 
 
-namespace feature_toogle {
-
-
-}
-
-bool set_contains(const std::set<std::string>& set, const std::string& s) {
-	return set.find(s) != set.cend();
-}
-
 std::set<std::string> calc_reachable_states(const mdp& m) {
 
 	std::set<std::string> reachable_states;
@@ -359,7 +350,7 @@ void optimize_scheduler(mdp& m, const std::vector<std::string>& ordered_variable
 }
 class application_errors {
 public:
-	static constexpr std::size_t count_error_codes{ 11 };
+	static constexpr std::size_t count_error_codes{ 12 };
 	inline static const std::array<std::string_view, count_error_codes> application_error_messages{ {
 		std::string_view("Ordinary EXIT"), // 0
 		std::string_view("Internal error: called with ZERO arguments") , // 1
@@ -371,7 +362,8 @@ public:
 		std::string_view("Fatal internal error"), // 7
 		std::string_view("Json entry for task not valid"), // 8
 		std::string_view("Found unreachable state(s)"), // 9
-		std::string_view("Found state(s) where reaching target is not guaranteed") // 10
+		std::string_view("Found state(s) where reaching target is not guaranteed"), // 10
+		std::string_view("Crinkle values error") // 11
 		}
 	};
 
@@ -398,8 +390,11 @@ void check_task_okay(const nlohmann::json& merged_json) {
 	json_task_error::check("checks_contain_ignore_non_positive_cycles_on_target_states_bool", checks_json.at(keywords::checks::ignore_non_positive_cycles_on_target_states).is_boolean());
 
 	// check for "calc:"
-	json_task_error::check("merged_containes_key_calc", merged_json.contains(keywords::calc));
+	json_task_error::check("task_containes_calc", task_json.contains(keywords::calc));
 	const auto& calc_json{ task_json.at(keywords::calc) };
+	json_task_error::check("calc_containes_mode", calc_json.contains(keywords::mode));
+	const auto& task_calc_mode{ calc_json.at(keywords::mode) };
+	json_task_error::check("task_calc_mode_is_string", task_calc_mode.is_string());
 
 }
 
@@ -505,9 +500,9 @@ bool check_reaching_target_is_guaranteed(mdp& m) {
 				m.probabilities.at(pair.first).cbegin(),
 				m.probabilities.at(pair.first).cend(),
 				!m.probabilities.at(pair.first).empty(),
-				[&](const std::pair<std::string, std::map<std::string, rational_type>>& action_paired_distr, bool b) {
+				[&](bool b, const std::map<std::string, std::map<std::string, rational_type>>::const_iterator::value_type& action_paired_distr) -> bool {
 					return b && std::accumulate(action_paired_distr.second.cbegin(), action_paired_distr.second.cend(), false,
-						[&](const std::pair<std::string, rational_type>& next_state_prob, bool inner_b) {
+						[&](bool inner_b, const std::pair<std::string, rational_type>& next_state_prob) {
 							return inner_b || prob_to_target_is_positive[next_state_prob.first];
 						});
 				}
@@ -527,14 +522,53 @@ bool check_reaching_target_is_guaranteed(mdp& m) {
 	return !found_error;
 }
 
-int run_starting_from_merged_json(const nlohmann::json& merged_json) {
+class modification {
+public:
 
+	virtual rational_type threshold() const = 0;
+
+	virtual rational_type func(const rational_type& arg) const = 0;
+
+};
+
+class crinkle : public modification {
+
+	rational_type ratio;
+	rational_type t;
+
+	static const rational_type& max(const rational_type& l, const rational_type& r) {
+		return l > r ? l : r;
+	}
+	static const rational_type& min(const rational_type& l, const rational_type& r) {
+		return l < r ? l : r;
+	}
+public:
+	crinkle(const rational_type& ratio, const rational_type& t) : ratio(ratio), t(t) {}
+
+	virtual rational_type threshold() const override {
+		return t;
+	}
+
+	virtual rational_type func(const rational_type& arg) const override {
+		auto RATIONAL_ZERO{ rational_type(0) };
+		if (arg < t) {
+			return ratio * arg + min(t, RATIONAL_ZERO) * (ratio - rational_type(1));
+		}
+		else {
+			return arg + max(RATIONAL_ZERO, t) * (ratio - rational_type(1));
+		}
+	}
+
+};
+
+
+int run_starting_from_merged_json(const nlohmann::json& merged_json) {
 	standard_logger()->info("Checking for validness of MDP (json -> MDP)...");
 
 	mdp m;
 
 	try {
-		check_valid_mdp(merged_json, m);
+		check_valid_mdp_and_load_mdp_from_json(merged_json, m);
 	}
 	catch (mdp_sanity& e) {
 		standard_logger()->error(e.what());
@@ -563,9 +597,18 @@ int run_starting_from_merged_json(const nlohmann::json& merged_json) {
 	const bool task_checks_reaching_target_with_probability_1{
 		merged_json[keywords::task][keywords::checks::checks][keywords::checks::reaching_target_with_probability_1]
 	};
-	const bool task_checks_no_unreachable_states{
-		merged_json[keywords::task][keywords::checks::checks][keywords::checks::no_unreachable_states]
+	/*
+	const bool task_checks_no_negative_cycles{
+		merged_json[keywords::task][keywords::checks::checks][keywords::checks::only_positive_cycles]
 	};
+	*/ //##### add this for another mode
+
+	const bool task_checks_ignore_non_positive_cycles_on_target_states{
+		merged_json[keywords::task][keywords::checks::checks][keywords::checks::ignore_non_positive_cycles_on_target_states] ///## not yet implemented
+	};
+	// "ignore-non-positive-cycles-on-target-states"##### not yet implemented
+	// should remove all outgoing edges on target states!!!
+
 
 	// check:no unreachable states / remove unreachable states and their transitions / rewards....
 	// also removes 0-probability transitions!!!
@@ -590,13 +633,9 @@ int run_starting_from_merged_json(const nlohmann::json& merged_json) {
 		}
 	}
 
-	//       "reaching-target-with-probability-1": true,
-	//       "only-positive-cycles": true
-
-
 	std::map<std::string, rational_type> delta_max;
 	try {
-		delta_max = calc_delta_max_state_wise(m, ignore_non_positive_loops_on_target_states); //##check for negative loops!!!
+		delta_max = calc_delta_max_state_wise(m, !task_checks_ignore_non_positive_cycles_on_target_states);
 	}
 	catch (const found_negative_loop& e) {
 		standard_logger()->error(e.what());
@@ -611,27 +650,47 @@ int run_starting_from_merged_json(const nlohmann::json& merged_json) {
 		return error_code;
 	}
 
+	auto& calc_json{ merged_json.at(keywords::task).at(keywords::calc) };
+	if (calc_json.at(keywords::mode) == keywords::value::crinkle.data()) {
 
+		rational_type t;
+		rational_type r;
+		try {
+			json_task_error::check("mode_crinkle_has_t", calc_json.contains("t"));
+			json_task_error::check("mode_crinkle_has_t_string", calc_json.at("t").is_string());
+			t = string_to_rational_type(calc_json.at("t").get<std::string>());
+			json_task_error::check("mode_crinkle_has_r", calc_json.contains("r"));
+			json_task_error::check("mode_crinkle_has_r_string", calc_json.at("r").is_string());
+			r = string_to_rational_type(calc_json.at("r").get<std::string>());
+		}
+		catch (const json_task_error& e) {
+			standard_logger()->error(e.what());
+			const std::size_t error_code{ 8 };
+			standard_logger()->error(application_errors::application_error_messages[error_code].data());
+			return error_code;
+		}
+		catch (rational_parse_error& e) {
+			standard_logger()->error(e.what());
+			const std::size_t error_code{ 11 };
+			standard_logger()->error(application_errors::application_error_messages[error_code].data());
+			return error_code;
+		}
+		auto c = crinkle::crinkle(r, t);
 
-	mdp n;
+		mdp n;
+		std::vector<std::string> ordered_variables;
+		standard_logger()->info("Unfolding MDP...");
+		n = unfold(m, c, delta_max, ordered_variables);
 
-	rational_type threshold{ 10 };
-	const rational_type factor = 1000;
-	const auto crinkle =
-		[&threshold, &factor](const rational_type& x) -> rational_type {
-		return (x < threshold) ?
-			factor * x
-			: x + (factor - rational_type(1)) * threshold;
-	};
+		optimize_scheduler(n, ordered_variables);
+
+	}
+	else {
+		// unknown task calc mode #### throw error
+	}
 
 	// create unfold-mdp
-	std::vector<std::string> ordered_variables;
-	n = unfold(m, crinkle, threshold, delta_max, ordered_variables);
 	//#### will break if in m state names use underscore
-
-
-	standard_logger()->info("got unfolded mdp:");
-	standard_logger()->info(mdp_to_json(n).dump(3));
 
 	//#### calc all optimal scheduers!!!
 
@@ -647,61 +706,7 @@ int run_starting_from_merged_json(const nlohmann::json& merged_json) {
 
 	// check for all nodes with multiple optimal solutions...
 
-	optimize_scheduler(n, ordered_variables);
-
 	// json...
-
-	standard_logger()->trace(input.dump(3));
-
-	mdp m;
-
-	const bool ok{ check_valid_mdp(input, m) };
-
-	if (!ok) {
-		standard_logger()->error("invalid MDP");
-	}
-	else {
-		standard_logger()->info("check MDP: ok");
-	}
-
-	std::map<std::string, rational_type> delta_max = calc_delta_max_state_wise(m);
-
-	mdp n;
-
-	rational_type threshold{ 10 };
-	const rational_type factor = 1000;
-	const auto crinkle =
-		[&threshold, &factor](const rational_type& x) -> rational_type {
-		return (x < threshold) ?
-			factor * x
-			: x + (factor - rational_type(1)) * threshold;
-	};
-
-	// create unfold-mdp
-	std::vector<std::string> ordered_variables;
-	n = unfold(m, crinkle, threshold, delta_max, ordered_variables);
-	//#### will break if in m state names use underscore
-
-
-	standard_logger()->info("got unfolded mdp:");
-	standard_logger()->info(mdp_to_json(n).dump(3));
-
-
-	// find an optimal det memless scheduler
-	// 
-	// select a scheduler randomly..
-	// A:
-	// MDP + scheduler -> LGS
-	// solve LGS...
-	// locally select an optimal scheduler..
-	// loop -> A, but
-	// if there was no better sched decision found anywhere, stop.
-
-	// check for all nodes with multiple optimal solutions...
-
-	optimize_scheduler(n, ordered_variables);
-
-
 
 	standard_logger()->info(application_errors::application_error_messages[0]); // no error
 	return 0;
@@ -716,7 +721,7 @@ int load_jsons_and_run(const std::vector<std::string>& arguments) {
 			jsons.push_back(load_json<true>(arguments[i]));
 			standard_logger()->trace(std::string("file  ") + std::to_string(i) + jsons.back().dump(3));
 		}
-		catch (const nlohmann::json& error) {
+		catch (const nlohmann::json&) {
 			const std::size_t error_code{ 3 };
 			standard_logger()->error(application_errors::application_error_messages[error_code].data());
 			standard_logger()->error(std::string("file:") + arguments[i]);

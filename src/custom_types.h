@@ -4,6 +4,9 @@
 #include <boost/multiprecision/cpp_int.hpp>
 #include <boost/rational.hpp>
 
+#include <set>
+#include <map>
+
 using rational_type = boost::rational<boost::multiprecision::cpp_int>;
 
 
@@ -25,7 +28,7 @@ class calc_delta_max_error : public std::runtime_error {
 public:
 
 	template <class T>
-	calc_delta_max_error(const T& arg) : std::logic_error(arg) {}
+	calc_delta_max_error(const T& arg) : std::runtime_error(arg) {}
 
 	template <class T>
 	static void check(const T& message, bool check_result) {

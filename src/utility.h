@@ -12,6 +12,10 @@ namespace {
 	auto& utility_logger = standard_logger;
 }
 
+inline bool set_contains(const std::set<std::string>& set, const std::string& s) {
+	return set.find(s) != set.cend();
+}
+
 template<bool _THROW_EXCEPTION = false>
 inline nlohmann::json load_json(const std::string& file_name, const nlohmann::json& default_json = nlohmann::json::object()) {
 	std::ifstream ofile;

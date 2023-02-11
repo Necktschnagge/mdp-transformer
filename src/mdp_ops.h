@@ -3,6 +3,7 @@
 #include "logger.h"
 #include "custom_types.h"
 #include "const_strings.h"
+#include "utility.h"
 
 
 #include <nlohmann/json.hpp>
@@ -33,14 +34,14 @@ inline bool sets_disjoint(IteratorA a_begin, IteratorA a_end, IteratorB b_begin,
 
 
 
-void check_valid_mdp(const nlohmann::json& input, mdp& fill_in);
+void check_valid_mdp_and_load_mdp_from_json(const nlohmann::json& input, mdp& fill_in);
 
 
 
 //#### mdp sanity checks should stop further calculations!
 
 template<class _Modification>
-inline mdp unfold(const mdp& m, const _Modification& func, rational_type threshold, const std::map<std::string, rational_type>& delta_max, std::vector<std::string>& ordered_variables) {
+inline mdp unfold(const mdp& m, const _Modification& func, const std::map<std::string, rational_type>& delta_max, std::vector<std::string>& ordered_variables) {
 
 	std::list<further_expand_record> further_expand;
 	/*
@@ -92,7 +93,7 @@ inline mdp unfold(const mdp& m, const _Modification& func, rational_type thresho
 			}
 			rational_type m_next_rew = expand.accumulated_reward + step_reward;
 
-			n.rewards[expand.new_state_name][action_name] = func(m_next_rew) - func(expand.accumulated_reward); // is always okay.
+			n.rewards[expand.new_state_name][action_name] = func.func(m_next_rew) - func.func(expand.accumulated_reward); // is always okay.
 			// we need to check if we passed threshold + delta_max....
 
 			for (const auto& choose_next_state : distr) {
@@ -101,7 +102,7 @@ inline mdp unfold(const mdp& m, const _Modification& func, rational_type thresho
 
 				std::string new_next_state_name = get_new_state_name(next_state_name, m_next_rew);
 				// check if we passed threshold + delta_max....
-				if (m_next_rew > threshold + delta_max.at(next_state_name)) {
+				if (m_next_rew > func.threshold() + delta_max.at(next_state_name)) {
 					new_next_state_name = next_state_name;
 				}
 
@@ -130,11 +131,6 @@ inline std::map<std::string, rational_type> calc_delta_max_state_wise(const mdp&
 
 	for (const auto& state : m.states) {
 		result[state] = rational_type(0);
-	}
-
-	if (ignore_target_states) {
-		for (const auto& target : m.targets) {
-		}
 	}
 
 	// We need to check for negative loops here.

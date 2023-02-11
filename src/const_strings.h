@@ -10,6 +10,11 @@ namespace keywords {
 
 	static constexpr std::string_view task{ "task" };
 	static constexpr std::string_view calc{ "calc" };
+	static constexpr std::string_view mode{ "mode" };
+
+	namespace value {
+		static constexpr std::string_view crinkle{ "crinkle" };
+	}
 
 	namespace checks {
 		static constexpr std::string_view checks{ "checks" };

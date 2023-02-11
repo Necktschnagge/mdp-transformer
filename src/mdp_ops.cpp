@@ -1,6 +1,6 @@
 #include "mdp_ops.h"
 
-void check_valid_mdp(const nlohmann::json& input, mdp& fill_in) {
+void check_valid_mdp_and_load_mdp_from_json(const nlohmann::json& input, mdp& fill_in) {
 	// do all checks
 	/*
 	states:
