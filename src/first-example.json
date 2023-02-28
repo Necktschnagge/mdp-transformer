@@ -1,0 +1,64 @@
+{
+  "states": [
+    "s0",
+    "s1",
+    "s2",
+    "s3"
+  ],
+  "actions": [
+    "a",
+    "b",
+    "c"
+  ],
+  "probabilities": {
+    "s0": {
+      "a": {
+        "s0": "1/2",
+        "s1": "1/2"
+      }
+    },
+    "s1": {
+      "b": {
+        "s0": "1/2",
+        "s1": "1/4",
+        "s2": "1/16",
+        "s3": "3/16"
+      }
+    },
+    "s2": {},
+    "s3": {
+      "a": {
+        "s0" :  "1"
+      }
+    }
+  },
+  "initial": "s0",
+  "rewards": {
+    "s0": {
+      "a": "5"
+    },
+    "s1": {
+      "b": "7"
+    },
+    "s3": {
+      "a": "-10"
+    }
+  },
+  "targets": [
+    "s2"
+  ],
+
+  "task": {
+    "checks": {
+      "no-unreachable-states": true,
+      "reaching-target-with-probability-1": true,
+      "only-positive-cycles": true,
+      "ignore-non-positive-cycles-on-target-states": true
+    },
+    "calc": {
+      "mode": "crinkle",
+      "t": "12",
+      "r": "3"
+    }
+  }
+}
