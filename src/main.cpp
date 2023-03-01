@@ -192,7 +192,7 @@ std::size_t get_index(const std::vector<std::string>& str_vec, const std::string
 	throw std::logic_error("String not contained in string vector.");
 }
 
-void optimize_scheduler(mdp& m, const std::vector<std::string>& ordered_variables) {
+void optimize_scheduler(mdp& m, const std::vector<std::string>& ordered_variables) { // do-check!
 	scheduler_container cont;
 
 	mdp_view view = mdp_view(m);
@@ -350,7 +350,7 @@ void optimize_scheduler(mdp& m, const std::vector<std::string>& ordered_variable
 }
 class application_errors {
 public:
-	static constexpr std::size_t count_error_codes{ 12 };
+	static constexpr std::size_t count_error_codes{ 13 };
 	inline static const std::array<std::string_view, count_error_codes> application_error_messages{ {
 		std::string_view("Ordinary EXIT"), // 0
 		std::string_view("Internal error: called with ZERO arguments") , // 1
@@ -363,14 +363,15 @@ public:
 		std::string_view("Json entry for task not valid"), // 8
 		std::string_view("Found unreachable state(s)"), // 9
 		std::string_view("Found state(s) where reaching target is not guaranteed"), // 10
-		std::string_view("Crinkle values error") // 11
+		std::string_view("Crinkle values error"), // 11
+		std::string_view("Unknown calc mode. Don't know what to do") // 12
 		}
 	};
 
 
 };
 
-void check_task_okay(const nlohmann::json& merged_json) {
+void check_task_okay(const nlohmann::json& merged_json) { // do-check!
 
 	// check for "task:"
 	json_task_error::check("merged_json_is_object", merged_json.is_object());
@@ -382,12 +383,12 @@ void check_task_okay(const nlohmann::json& merged_json) {
 	const auto& checks_json{ task_json.at(keywords::checks::checks) };
 	json_task_error::check("checks_contain_no_unreachable_states", checks_json.contains(keywords::checks::no_unreachable_states));
 	json_task_error::check("checks_contain_no_unreachable_states_bool", checks_json.at(keywords::checks::no_unreachable_states).is_boolean());
-	json_task_error::check("checks_contain_only_positive_cycles", checks_json.contains(keywords::checks::only_positive_cycles));
-	json_task_error::check("checks_contain_only_positive_cycles_bool", checks_json.at(keywords::checks::only_positive_cycles).is_boolean());
+	json_task_error::check("checks_contain_only_positive_cycles", checks_json.contains(keywords::checks::no_negative_cycles));
+	json_task_error::check("checks_contain_only_positive_cycles_bool", checks_json.at(keywords::checks::no_negative_cycles).is_boolean());
 	json_task_error::check("checks_contain_reaching_target_with_probability_1", checks_json.contains(keywords::checks::reaching_target_with_probability_1));
 	json_task_error::check("checks_contain_reaching_target_with_probability_1_bool", checks_json.at(keywords::checks::reaching_target_with_probability_1).is_boolean());
-	json_task_error::check("checks_contain_ignore_non_positive_cycles_on_target_states", checks_json.contains(keywords::checks::ignore_non_positive_cycles_on_target_states));
-	json_task_error::check("checks_contain_ignore_non_positive_cycles_on_target_states_bool", checks_json.at(keywords::checks::ignore_non_positive_cycles_on_target_states).is_boolean());
+	json_task_error::check("checks_contain_ignore_non_positive_cycles_on_target_states", checks_json.contains(keywords::checks::ignore_negative_cycles_on_target_states));
+	json_task_error::check("checks_contain_ignore_non_positive_cycles_on_target_states_bool", checks_json.at(keywords::checks::ignore_negative_cycles_on_target_states).is_boolean());
 
 	// check for "calc:"
 	json_task_error::check("task_containes_calc", task_json.contains(keywords::calc));
@@ -398,7 +399,10 @@ void check_task_okay(const nlohmann::json& merged_json) {
 
 }
 
-void remove_unreachable_states(mdp& m, bool error_on_exists_unreachable_state) {
+/**
+*	removes unreachable states, throws error if error_on_exists_unreachable_state
+*/
+void remove_unreachable_states(mdp& m, bool error_on_exists_unreachable_state) { // do-check!
 	std::string& initial_state{ m.initial };
 
 	std::vector<std::string> reachables;
@@ -478,7 +482,7 @@ void remove_unreachable_states(mdp& m, bool error_on_exists_unreachable_state) {
 	}
 }
 
-bool check_reaching_target_is_guaranteed(mdp& m) {
+bool check_reaching_target_is_guaranteed(mdp& m) { // do-check!
 	std::map<std::string, bool> prob_to_target_is_positive;
 	std::map<std::string, bool> is_target;
 	for (const auto& state : m.states) {
@@ -562,11 +566,14 @@ public:
 };
 
 
-int run_starting_from_merged_json(const nlohmann::json& merged_json) {
+int run_starting_from_merged_json(const nlohmann::json& merged_json) { // do-check!
 	standard_logger()->info("Checking for validness of MDP (json -> MDP)...");
 
 	mdp m;
 
+	/*
+		BUILD UP MDP
+	*/
 	try {
 		check_valid_mdp_and_load_mdp_from_json(merged_json, m);
 	}
@@ -579,6 +586,9 @@ int run_starting_from_merged_json(const nlohmann::json& merged_json) {
 
 	standard_logger()->info("Successfully build up MDP from json!");
 
+	/*
+		CHECK TASK
+	*/
 	try {
 		check_task_okay(merged_json);
 	}
@@ -589,27 +599,28 @@ int run_starting_from_merged_json(const nlohmann::json& merged_json) {
 		return error_code;
 	}
 
-	standard_logger()->info("Check for certain MDP properties...");
-
+	/*
+		CHECK CONFIG
+	*/
 	const bool task_checks_no_unreachable_states{
 		merged_json[keywords::task][keywords::checks::checks][keywords::checks::no_unreachable_states]
 	};
 	const bool task_checks_reaching_target_with_probability_1{
 		merged_json[keywords::task][keywords::checks::checks][keywords::checks::reaching_target_with_probability_1]
 	};
-	/*
 	const bool task_checks_no_negative_cycles{
-		merged_json[keywords::task][keywords::checks::checks][keywords::checks::only_positive_cycles]
+		merged_json[keywords::task][keywords::checks::checks][keywords::checks::no_negative_cycles]
 	};
-	*/ //##### add this for another mode
-
-	const bool task_checks_ignore_non_positive_cycles_on_target_states{
-		merged_json[keywords::task][keywords::checks::checks][keywords::checks::ignore_non_positive_cycles_on_target_states] ///## not yet implemented
+	const bool task_checks_ignore_negative_cycles_on_target_states{
+		merged_json[keywords::task][keywords::checks::checks][keywords::checks::ignore_negative_cycles_on_target_states]
 	};
-	// "ignore-non-positive-cycles-on-target-states"##### not yet implemented
-	// should remove all outgoing edges on target states!!!
 
-
+	if (!task_checks_ignore_negative_cycles_on_target_states) {
+		standard_logger()->warn("check for negative cycles on target states not available");
+	}
+	
+	standard_logger()->info("Check for certain MDP properties...");
+	
 	// check:no unreachable states / remove unreachable states and their transitions / rewards....
 	// also removes 0-probability transitions!!!
 	try {
@@ -635,7 +646,7 @@ int run_starting_from_merged_json(const nlohmann::json& merged_json) {
 
 	std::map<std::string, rational_type> delta_max;
 	try {
-		delta_max = calc_delta_max_state_wise(m, !task_checks_ignore_non_positive_cycles_on_target_states);
+		delta_max = calc_delta_max_state_wise(m, task_checks_ignore_negative_cycles_on_target_states, task_checks_no_negative_cycles);
 	}
 	catch (const found_negative_loop& e) {
 		standard_logger()->error(e.what());
@@ -651,7 +662,7 @@ int run_starting_from_merged_json(const nlohmann::json& merged_json) {
 	}
 
 	auto& calc_json{ merged_json.at(keywords::task).at(keywords::calc) };
-	if (calc_json.at(keywords::mode) == keywords::value::crinkle.data()) {
+	if (calc_json.at(keywords::mode).get<std::string>() == keywords::value::crinkle.data()) {
 
 		rational_type t;
 		rational_type r;
@@ -686,6 +697,10 @@ int run_starting_from_merged_json(const nlohmann::json& merged_json) {
 
 	}
 	else {
+		const std::size_t error_code{ 12 };
+		standard_logger()->error(application_errors::application_error_messages[error_code].data());
+		standard_logger()->error(std::string("json: task.calc.mode   ==   \"") + calc_json.at(keywords::mode).get<std::string>() + "\"");
+		return error_code;
 		// unknown task calc mode #### throw error
 	}
 
@@ -712,7 +727,7 @@ int run_starting_from_merged_json(const nlohmann::json& merged_json) {
 	return 0;
 }
 
-int load_jsons_and_run(const std::vector<std::string>& arguments) {
+int load_jsons_and_run(const std::vector<std::string>& arguments) { // ready
 	std::vector<nlohmann::json> jsons;
 
 	// open files and parse as json
@@ -745,7 +760,8 @@ int load_jsons_and_run(const std::vector<std::string>& arguments) {
 	return run_starting_from_merged_json(merged_json);
 }
 
-int main(int argc, char* argv[])
+
+int main(int argc, char* argv[])// ready
 {
 	init_logger();
 

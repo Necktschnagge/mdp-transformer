@@ -1,6 +1,6 @@
 #include "custom_types.h"
 
-rational_type string_to_rational_type(const std::string& s) {
+rational_type string_to_rational_type(const std::string& s) { // do-check!
 	if (s.empty())
 		throw rational_parse_error("empty");
 	if (s.front() == ' ')

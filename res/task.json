@@ -3,8 +3,8 @@
     "checks": {
       "no-unreachable-states": true,
       "reaching-target-with-probability-1": true,
-      "only-positive-cycles": true,
-      "ignore-non-positive-cycles-on-target-states": true
+      "no-negative-cycles": true,
+      "ignore-negative-cycles-on-target-states": true
     },
     "calc": {
       "mode": "crinkle",

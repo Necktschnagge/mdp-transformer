@@ -41,7 +41,7 @@ void check_valid_mdp_and_load_mdp_from_json(const nlohmann::json& input, mdp& fi
 //#### mdp sanity checks should stop further calculations!
 
 template<class _Modification>
-inline mdp unfold(const mdp& m, const _Modification& func, const std::map<std::string, rational_type>& delta_max, std::vector<std::string>& ordered_variables) {
+inline mdp unfold(const mdp& m, const _Modification& func, const std::map<std::string, rational_type>& delta_max, std::vector<std::string>& ordered_variables) { // do-check!
 
 	std::list<further_expand_record> further_expand;
 	/*
@@ -125,17 +125,20 @@ inline mdp unfold(const mdp& m, const _Modification& func, const std::map<std::s
 
 nlohmann::json mdp_to_json(const mdp& m);
 
-inline std::map<std::string, rational_type> calc_delta_max_state_wise(const mdp& m, bool ignore_target_states) {
+
+/*
+return 0 on ignored,
+max delta otherwise
+-m.negative_loop_delta_threshold() if there is a negative loop
+*/
+inline std::map<std::string, rational_type> calc_delta_max_state_wise(const mdp& m, bool ignore_target_states, bool error_on_negative_loop) { // do-check!
+	// should only check for negative circles
 
 	std::map<std::string, rational_type> result;
 
 	for (const auto& state : m.states) {
 		result[state] = rational_type(0);
 	}
-
-	// We need to check for negative loops here.
-	// If and only if we every see a delta of - min_reward * number_of_states, there is some negative loop.
-	const rational_type negative_loop_delta_threshold{ rational_type(m.states.size()) * m.min_reward() };
 
 	bool continue_loop = true;
 	while (continue_loop) {
@@ -146,15 +149,19 @@ inline std::map<std::string, rational_type> calc_delta_max_state_wise(const mdp&
 			}
 			try {
 				const auto& actions{ m.probabilities.at(state) }; // building MDP ensures an entry for every state, even if left in json
-
 				for (const auto& action_tree : actions) {
 					for (const auto& next_state_pair : action_tree.second) {
-						rational_type update = std::min(result[state], result[next_state_pair.first] + m.rewards.at(state).at(action_tree.first)); // building MDP ensures an entry for every state,action, even if left in json
+						rational_type update = std::max(
+							m.negative_loop_delta_threshold(),
+							std::min(result[state], result[next_state_pair.first] + m.rewards.at(state).at(action_tree.first)) // building MDP ensures an entry for every state,action, even if left in json
+						);
 						if (result[state] != update)
 							continue_loop = true;
 						result[state] = update;
-						if (update < negative_loop_delta_threshold) {
-							throw found_negative_loop("Found negative loop while determining delta max.");
+						if (update <= m.negative_loop_delta_threshold()) {
+							if (error_on_negative_loop) {
+								throw found_negative_loop("Found negative loop while determining delta max.");
+							}
 						}
 						standard_logger()->trace(std::string("UPDATE delta_m for  >" + state + "<  :" + update.numerator().str() + "/" + update.denominator().str()));
 					}

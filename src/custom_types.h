@@ -86,6 +86,11 @@ public:
 		}
 		return min;
 	}
+
+	rational_type negative_loop_delta_threshold() const {
+		return rational_type(states.size()) * min_reward();
+	}
+
 };
 
 class further_expand_record {
