@@ -16,7 +16,7 @@ namespace keywords {
 		static constexpr std::string_view classic{ "classic" };
 		static constexpr std::string_view crinkle{ "crinkle" };
 		static constexpr std::string_view quadratic{ "quadratic" };
-		static constexpr std::string_view vVar_approach{ "vVar-approach" };
+		static constexpr std::string_view hVar_approach{ "hVar-approach" };
 	}
 
 	namespace checks {

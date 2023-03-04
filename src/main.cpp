@@ -152,36 +152,6 @@ bool check_mdp_constraints_and_simplify(mdp& m) {
 }
 
 
-class mdp_view {
-
-	mdp* m;
-
-public:
-	mdp_view(mdp& m) : m(&m) {}
-
-	std::vector<std::string> get_actions_of(const std::string& state) {
-		auto result = std::vector<std::string>(m->probabilities[state].size());
-		std::transform(
-			m->probabilities[state].cbegin(),
-			m->probabilities[state].cend(),
-			result.begin(),
-			[](const auto& pair) {
-				return pair.first;
-			}
-		);
-		return result;
-	}
-
-};
-
-class scheduler_container {
-public:
-	using scheduler = std::map<std::string, std::size_t>; // stationary scheduler: maps to each state the index of the action chosen in the state 
-
-	std::map<std::string, std::vector<std::string>> available_actions_per_state;
-	scheduler sched;
-
-};
 
 std::size_t get_index(const std::vector<std::string>& str_vec, const std::string& s) {
 	for (std::size_t i{ 0 }; i < str_vec.size(); ++i) {
@@ -192,96 +162,83 @@ std::size_t get_index(const std::vector<std::string>& str_vec, const std::string
 	throw std::logic_error("String not contained in string vector.");
 }
 
+
+void create_matrix(const mdp& m, const std::vector<std::string>& ordered_variables, scheduler_container& cont, linear_systems::matrix& mat, linear_systems::rational_vector& rew, linear_systems::id_vector& unresolved, linear_systems::id_vector& resolved) {
+
+	for (const auto& var : ordered_variables) {
+		const auto& line_var_id{ mat.size() };
+		if (cont.available_actions_per_state[var].empty()) { // it is a target state
+			rew.emplace_back(0);
+			linear_systems::matrix_line line = { { std::make_pair(line_var_id, rational_type(1)) } };
+			mat.emplace_back(std::move(line));
+		}
+		else { // it is no target state
+			const auto& action_id{ cont.sched[var] };
+			const auto action{ cont.available_actions_per_state[var][action_id] };
+			rew.emplace_back(m.rewards.at(var).at(action));
+			linear_systems::matrix_line line;
+			bool extra_diagonal_entry{ true };
+			for (const auto& state_paired_rational : m.probabilities.at(var).at(action)) {
+				const auto& var_id{ get_index(ordered_variables, state_paired_rational.first) };
+				auto value{ state_paired_rational.second * rational_type(-1) };
+				if (var_id == line_var_id) {
+					value += rational_type(1);
+					extra_diagonal_entry = false;
+				}
+				line.push_back(std::make_pair(var_id, value));
+			}
+			if (extra_diagonal_entry) {
+				line.push_back(std::make_pair(line_var_id, 1));
+			}
+			mat.emplace_back(std::move(line));
+		}
+	}
+	// Px = rew
+	// target: xi = 0
+	// others: xj = Pk xk + r 
+	// .....->  (d_j - Pk) x = r
+	//
+
+	std::transform(
+		m.targets.begin(),
+		m.targets.end(),
+		std::back_inserter(resolved),
+		[&](const std::string& s) -> linear_systems::var_id { return get_index(ordered_variables, s); }
+	);
+	std::sort(resolved.begin(), resolved.end());
+
+	for (linear_systems::var_id i{ 0 }; i < mat.size(); ++i) {
+		unresolved.push_back(i);
+	}
+
+	auto new_end = std::copy_if(
+		unresolved.begin(),
+		unresolved.end(),
+		unresolved.begin(),
+		[&](const linear_systems::var_id& var) -> bool {
+			/* not contained in resolved */
+			auto found = std::lower_bound(resolved.cbegin(), resolved.cend(), var);
+			return found == resolved.cend() || *found != var;
+		}
+	);
+	unresolved.erase(new_end, unresolved.end());
+}
+
 void optimize_scheduler(mdp& m, const std::vector<std::string>& ordered_variables) { // do-check!
 	scheduler_container cont;
 
-	mdp_view view = mdp_view(m);
 
-	// fill quick table of available actions
-	for (auto state = m.states.cbegin(); state != m.states.cend(); ++state) {
-		cont.available_actions_per_state[*state] = view.get_actions_of(*state);
-		if (cont.available_actions_per_state[*state].empty() && !set_contains(m.targets, *state)) {
-			standard_logger()->error("There is some non target state which has no action enabled");
-			throw 0;//### fix this!
-		}
-	}
-
-	//+++++++++++
-
-	// select deterministically a start node for our optimization: select the first available action everywhere.
-	for (auto non_trap_state_paired_actions = cont.available_actions_per_state.cbegin();
-		non_trap_state_paired_actions != cont.available_actions_per_state.cend();
-		++non_trap_state_paired_actions
-		) {
-		if (!non_trap_state_paired_actions->second.empty()) {
-			cont.sched[non_trap_state_paired_actions->first] = 0;
-		}
-	}
+	cont.init(m); // start with the "smallest" scheduler
 
 	while (true) {
 
-		// create matrix
 		linear_systems::matrix mat;
 		linear_systems::rational_vector rew;
-		for (const auto& var : ordered_variables) {
-			const auto& line_var_id{ mat.size() };
-			if (cont.available_actions_per_state[var].empty()) { // it is a target state
-				rew.emplace_back(0);
-				linear_systems::matrix_line line = { { std::make_pair(line_var_id, rational_type(1)) } };
-				mat.emplace_back(std::move(line));
-			}
-			else { // it is no target state
-				const auto& action_id{ cont.sched[var] };
-				const auto action{ cont.available_actions_per_state[var][action_id] };
-				rew.emplace_back(m.rewards[var][action]);
-				linear_systems::matrix_line line;
-				bool extra_diagonal_entry{ true };
-				for (const auto& state_paired_rational : m.probabilities[var][action]) {
-					const auto& var_id{ get_index(ordered_variables, state_paired_rational.first) };
-					auto value{ state_paired_rational.second * rational_type(-1) };
-					if (var_id == line_var_id) {
-						value += rational_type(1);
-						extra_diagonal_entry = false;
-					}
-					line.push_back(std::make_pair(var_id, value));
-				}
-				if (extra_diagonal_entry) {
-					line.push_back(std::make_pair(line_var_id, 1));
-				}
-				mat.emplace_back(std::move(line));
-			}
-		}
-		// Px = rew
-		// target: xi = 0
-		// others: xj = Pk xk + r 
-		// .....->  (d_j - Pk) x = r
-		//
-
 		linear_systems::id_vector unresolved;
 		linear_systems::id_vector resolved;
-		std::transform(
-			m.targets.begin(),
-			m.targets.end(),
-			std::back_inserter(resolved),
-			[&](const std::string& s) -> linear_systems::var_id { return get_index(ordered_variables, s); }
-		);
-		std::sort(resolved.begin(), resolved.end());
 
-		for (linear_systems::var_id i{ 0 }; i < mat.size(); ++i) {
-			unresolved.push_back(i);
-		}
-
-		auto new_end = std::copy_if(
-			unresolved.begin(),
-			unresolved.end(),
-			unresolved.begin(),
-			[&](const linear_systems::var_id& var) -> bool {
-				/* not contained in resolved */
-				auto found = std::lower_bound(resolved.cbegin(), resolved.cend(), var);
-				return found == resolved.cend() || *found != var;
-			}
-		);
-		unresolved.erase(new_end, unresolved.end());
+		// create matrix
+		create_matrix(m, ordered_variables, cont, mat, rew, unresolved, resolved);
 
 		/*
 		for (const auto& decision : cont.sched) {
@@ -614,6 +571,102 @@ public:
 
 };
 
+std::tuple<rational_type, std::vector <rational_type>, std::vector<scheduler_container>> check_all_exponential_schedulers_for_hVar(mdp& m, const mdp& first_unfolded_with_normal_rewwards, const rational_type& lambda, const rational_type& cut_level, const std::vector<std::string>& ordered_variables) {
+	
+	scheduler_container cont;
+
+	rational_type best_seen_result;
+	std::vector <rational_type> mu_for_best_seen_result;
+	std::vector<scheduler_container> best_seen_scheduler;
+	bool first_result_found{ false };
+	std::mutex access_optimal_values;
+
+	cont.init(first_unfolded_with_normal_rewwards);
+
+	auto size_message = std::string("number of schedulers to be tested:   ") + cont.number_of_schedulers().numerator().str();
+	standard_logger()->trace(size_message);
+	do {
+		auto evaluate_one_scheduler = [&first_unfolded_with_normal_rewwards, &ordered_variables, &lambda, &m, &cont, &cut_level, &first_result_found, &best_seen_result, &mu_for_best_seen_result, &best_seen_scheduler]() { // cont
+			// to be filled in...
+			linear_systems::matrix mat;
+			linear_systems::rational_vector rew;
+			linear_systems::id_vector unresolved;
+			linear_systems::id_vector resolved;
+
+			// create matrix
+			create_matrix(first_unfolded_with_normal_rewwards, ordered_variables, cont, mat, rew, unresolved, resolved);
+
+
+			// solve matrix
+			solve_linear_system_dependency_order_optimized(mat, rew, unresolved, resolved);
+
+			// we have mu for classical problem so far
+			linear_systems::rational_vector current_solution = rew;
+
+			std::size_t index_of_initial_state = std::find(ordered_variables.cbegin(), ordered_variables.cend(), first_unfolded_with_normal_rewwards.initial) - ordered_variables.cbegin(); // initial state should be the first one, so == 0
+			if (index_of_initial_state != 0) {
+				standard_logger()->error("Internal error: exp-sched-index-of-initial-state");
+			}
+			rational_type current_mu = current_solution[index_of_initial_state];
+
+			const auto modify{
+				[&](const rational_type& arg) {
+					return arg - lambda * std::max(rational_type(0), current_mu) * std::max(rational_type(0), current_mu);
+				}
+			};
+
+			// now modify the rewards in m, so we can calculat ethe actual mu - \lambda hVar.
+
+			mdp unfolded_cut_with_modified_rewards;
+
+			std::vector<std::string> modified_ordered_variables;
+
+			scheduler_container cont2 = cont;
+
+			unfolded_cut_with_modified_rewards = modified_stupid_unfold(m, cut_level, modified_ordered_variables, modify, cont2);
+			{
+				// to be filled in...
+				linear_systems::matrix mat2;
+				linear_systems::rational_vector rew2;
+				linear_systems::id_vector unresolved2;
+				linear_systems::id_vector resolved2;
+
+				// create matrix
+				create_matrix(unfolded_cut_with_modified_rewards, modified_ordered_variables, cont2, mat2, rew2, unresolved2, resolved2);
+
+
+				// solve matrix
+				solve_linear_system_dependency_order_optimized(mat2, rew2, unresolved2, resolved2);
+
+				// we have mu for classical problem so far
+				linear_systems::rational_vector current_solution_with_hVar = rew2;
+
+				std::size_t index_of_initial_state2 = std::find(modified_ordered_variables.cbegin(), modified_ordered_variables.cend(), unfolded_cut_with_modified_rewards.initial) - modified_ordered_variables.cbegin(); // initial state should be the first one, so == 0
+				rational_type current_mu_minus_hVar = current_solution_with_hVar[index_of_initial_state2];
+
+				if (!first_result_found || current_mu_minus_hVar > best_seen_result) {
+					first_result_found = true;
+					best_seen_result = current_mu_minus_hVar;
+					mu_for_best_seen_result.clear();
+					best_seen_scheduler.clear();
+				}
+				if (current_mu_minus_hVar == best_seen_result) {
+					mu_for_best_seen_result.push_back(current_mu);
+					best_seen_scheduler.push_back(cont);
+
+				}
+			}
+		};
+		evaluate_one_scheduler();
+
+	} while (cont.operator++());
+
+	return std::make_tuple(best_seen_result, mu_for_best_seen_result, best_seen_scheduler);
+}
+
+
+
+
 int run_starting_from_merged_json(const nlohmann::json& merged_json) { // do-check!, ready but enhance the different cases -> common steps before might be inappropriate for other options
 	standard_logger()->info("Checking for validness of MDP (json -> MDP)...");
 
@@ -789,10 +842,11 @@ int run_starting_from_merged_json(const nlohmann::json& merged_json) { // do-che
 		goto before_return;
 	}
 
-	if (calc_json.at(keywords::mode).get<std::string>() == keywords::value::vVar_approach.data()) {
+	if (calc_json.at(keywords::mode).get<std::string>() == keywords::value::hVar_approach.data()) {
 
 		rational_type n; // maximum reward steps 
 		rational_type seconds; // seconds: if one approximation step takes longer then time, it will be the last one.
+		rational_type lambda; // lambda factor.
 
 		try {
 			json_task_error::check("mode_vVar_approach_has_n", calc_json.contains("n"));
@@ -801,6 +855,9 @@ int run_starting_from_merged_json(const nlohmann::json& merged_json) { // do-che
 			json_task_error::check("mode_vVar_approach_has_seconds", calc_json.contains("seconds"));
 			json_task_error::check("mode_vVar_approach_has_seconds_string", calc_json.at("seconds").is_string());
 			seconds = string_to_rational_type(calc_json.at("seconds").get<std::string>());
+			json_task_error::check("mode_vVar_approach_has_lambda", calc_json.contains("lambda"));
+			json_task_error::check("mode_vVar_approach_has_lambda_string", calc_json.at("lambda").is_string());
+			lambda = string_to_rational_type(calc_json.at("lambda").get<std::string>());
 		}
 		catch (const json_task_error& e) {
 			standard_logger()->error(e.what());
@@ -814,36 +871,108 @@ int run_starting_from_merged_json(const nlohmann::json& merged_json) { // do-che
 			standard_logger()->error(application_errors::application_error_messages[error_code].data());
 			return error_code;
 		}
+		standard_logger()->info("ready reading params!");
 
 		rational_type cut_level = std::min(rational_type(0), n);
 
-		while (!cut_level > n)
+		std::vector<
+			std::tuple<
+			rational_type, // cut level
+			std::tuple<
+			rational_type, // hVar optimal value
+			std::vector <rational_type>, // mu of optimal schedulers
+			std::vector<scheduler_container> // optimal schedulers
+			>,
+			std::vector<
+			std::pair<
+			rational_type, // stabilisation distance
+			std::map<
+			std::string, // original state name
+			std::size_t // index of chosen action
+			> // cut end scheduler
+			>
+			> //
+			>
+		> cut_level_to_optimal_solutions;
+
+		// use increasing cut_level until n
+		while (!(cut_level > n))
 		{
+			standard_logger()->trace(std::string("run on cut_level:   ") + cut_level.numerator().str() + "/" + cut_level.denominator().str());
+
+			// to be unfolded without any changed step rewards
 			mdp stupid_unfolded_mdp;
 
 			std::vector<std::string> ordered_variables;
-			stupid_unfolded_mdp = stupid_unfold(m, cut_level, ordered_variables);
+			std::map<std::string, // augmented state
+				std::pair<std::string, rational_type> // original state, reward accum.
+			> augmented_state_to_pair; // just to quickly get original state and accum reward out of a augmented state.
 
-				// unfold cut without changed rewards -> unfolded_mdp
+			stupid_unfolded_mdp = stupid_unfold(m, cut_level, ordered_variables, augmented_state_to_pair); // unfolding without any reward changes
+			standard_logger()->trace("Done: stupid_unfold");
 
-				// list all (exponential many) schedulers... -> vec_schedulers
+			auto tup = check_all_exponential_schedulers_for_hVar(m, stupid_unfolded_mdp, lambda, cut_level, ordered_variables); //trys all schedulers and returns the ones leading to maximum expected mu-hVar.
+			standard_logger()->trace("Done: exponential scheduler check");
 
-				// for x : vec__scheudlers:
-					// solve for expect values... mu
-					// modify unfolded_mdp for using poena quadratica (mu)
-					// solve for expect values .. result for this scheduler...
+			cut_level_to_optimal_solutions.push_back(std::make_tuple(cut_level, std::move(tup), std::vector<std::pair<rational_type, std::map<std::string, std::size_t>>>()));
+
+			auto& optimal_scheds_vector{ std::get<2>(std::get<1>(cut_level_to_optimal_solutions.back())) };
+			auto& optimal_cut_end_schedulers_and_stabilization_distance{ std::get<2>(cut_level_to_optimal_solutions.back()) };
+
+			const std::size_t number_of_optimal_scheds = optimal_scheds_vector.size();
+
+			for (std::size_t i = 0; i < number_of_optimal_scheds; ++i) { // iterate all optimal schedulers...
+
+				std::map<std::string, // original state name
+					std::size_t // index of chosen action
+				> cut_end_scheduler; // to extract the scheduler of the self-catching sub mdp at cut_level...
+
+				std::vector<std::map<std::string, std::pair<std::string, rational_type>>::iterator> cut_end_states; // iterators to the cut_end_states
+
+				for (auto iter = augmented_state_to_pair.begin(); iter != augmented_state_to_pair.end(); ++iter) {
+					if (iter->second.second == cut_level) {
+						cut_end_states.push_back(iter);
+						cut_end_scheduler[iter->second.first] = optimal_scheds_vector[i].sched[iter->first];
+					}
+				}
+
+				// check for stabilizing distance...
+
+				rational_type stabilization_distance{ 0 };
+				bool abort = false;
+				while (!abort && stabilization_distance <= cut_level) {
+					rational_type check_stab_distance = stabilization_distance + rational_type{ 1 }; ///#### alllow another distance t364698234764325847
+
+					for (auto iter = augmented_state_to_pair.begin(); iter != augmented_state_to_pair.end(); ++iter) {
+						if (iter->second.second >= check_stab_distance && iter->second.second < stabilization_distance) {
+							// check if the states in this range are stabilized with cut end scheduler:
+
+							if (
+								optimal_scheds_vector[i].sched[iter->first] != cut_end_scheduler[iter->second.first] // if scheduler decides not the stabilized way
+								) {
+								abort = true;
+							}
+						}
+					}
+
+					if (!abort) {
+						stabilization_distance = check_stab_distance;
+					}
+				}
+
+				// @here we have calculated the distance of stabilization...
+				optimal_cut_end_schedulers_and_stabilization_distance.emplace_back(stabilization_distance, cut_end_scheduler);
+
+				std::string message1 = "cut_level:   " + cut_level.numerator().str() + "/" + cut_level.denominator().str() + "\n";
+				std::string message2 = "stabilisation distance:   " + stabilization_distance.numerator().str() + "/" + stabilization_distance.denominator().str() + "\n";
+				//std::string message3 = "cut_end_scheduler: ...";
+				standard_logger()->info(message1 + message2);
+
+			}
+			standard_logger()->info("--------------------------------------------");
+
+			cut_level += rational_type(1); // ##### introduce step variable t364698234764325847
 		}
-
-/*
-		const auto c{identity(t)};
-
-		mdp n;
-		std::vector<std::string> ordered_variables;
-		standard_logger()->info("Unfolding MDP (stupid mode)...");
-		n = unfold(m, c, delta_max, ordered_variables);
-
-		optimize_scheduler(n, ordered_variables);
-*/
 		goto before_return;
 	}
 
@@ -927,13 +1056,15 @@ int main(int argc, char* argv[])// ready
 
 	if (argc == 1) {
 		if constexpr (feature_toggle::RUN_ON_ZERO_ARGUMENTS) {
-			const auto example_path = std::string("../../src/example-mdp.json");
+			const auto example_path = std::string("../../src/test.json");
 			return load_jsons_and_run(std::vector<std::string>{example_path});
 		}
-		const std::size_t error_code{ 2 };
-		standard_logger()->error(application_errors::application_error_messages[error_code].data());
-		standard_logger()->info(argv[0]);
-		return error_code;
+		else {
+			const std::size_t error_code{ 2 };
+			standard_logger()->error(application_errors::application_error_messages[error_code].data());
+			standard_logger()->info(argv[0]);
+			return error_code;
+		}
 	}
 
 	std::vector<std::string> arguments;
