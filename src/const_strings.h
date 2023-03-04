@@ -13,7 +13,10 @@ namespace keywords {
 	static constexpr std::string_view mode{ "mode" };
 
 	namespace value {
+		static constexpr std::string_view classic{ "classic" };
 		static constexpr std::string_view crinkle{ "crinkle" };
+		static constexpr std::string_view quadratic{ "quadratic" };
+		static constexpr std::string_view vVar_approach{ "vVar-approach" };
 	}
 
 	namespace checks {

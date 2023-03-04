@@ -72,28 +72,28 @@ inline mdp unfold(const mdp& m, const _Modification& func, const std::map<std::s
 		further_expand.pop_front();
 
 		//check target state
-		if (m.targets.find(expand.old_state_name) != m.targets.cend()) {
+		if (m.targets.find(expand.original_state_name) != m.targets.cend()) {
 			// this is target state
-			n.targets.insert(expand.new_state_name);
+			n.targets.insert(expand.augmented_state_name);
 			continue; // do not expand target states. They will be final.
 		}
 
 		// here we are at some non-target state...
 
-		for (const auto& choose_action : m.probabilities.at(expand.old_state_name)) {
+		for (const auto& choose_action : m.probabilities.at(expand.original_state_name)) {
 			const auto& action_name = choose_action.first;
 			const auto& distr = choose_action.second;
 
 			rational_type step_reward = rational_type(0);
 			try {
-				step_reward = m.rewards.at(expand.old_state_name).at(action_name);
+				step_reward = m.rewards.at(expand.original_state_name).at(action_name);
 			}
 			catch (const std::out_of_range&) {
 				// ignore, it is 0 else alredy by definition line
 			}
 			rational_type m_next_rew = expand.accumulated_reward + step_reward;
 
-			n.rewards[expand.new_state_name][action_name] = func.func(m_next_rew) - func.func(expand.accumulated_reward); // is always okay.
+			n.rewards[expand.augmented_state_name][action_name] = func.func(m_next_rew) - func.func(expand.accumulated_reward); // is always okay.
 			// we need to check if we passed threshold + delta_max....
 
 			for (const auto& choose_next_state : distr) {
@@ -102,7 +102,7 @@ inline mdp unfold(const mdp& m, const _Modification& func, const std::map<std::s
 
 				std::string new_next_state_name = get_new_state_name(next_state_name, m_next_rew);
 				// check if we passed threshold + delta_max....
-				if (m_next_rew > func.threshold() + delta_max.at(next_state_name)) {
+				if (m_next_rew > func.threshold() + delta_max.at(next_state_name)) { // or current state is alredy in cut mode (se how it is solved in stupid_unfold)
 					new_next_state_name = next_state_name;
 				}
 
@@ -113,7 +113,89 @@ inline mdp unfold(const mdp& m, const _Modification& func, const std::map<std::s
 					further_expand.emplace_back(next_state_name, m_next_rew, new_next_state_name);
 				};
 
-				n.probabilities[expand.new_state_name][action_name][new_next_state_name] = prob;
+				n.probabilities[expand.augmented_state_name][action_name][new_next_state_name] = prob;
+
+			}
+
+		}
+
+	}
+	return n;
+}
+
+inline mdp stupid_unfold(const mdp& m, const rational_type& cut_level, std::vector<std::string>& ordered_variables) { // do-check!
+
+	std::list<further_expand_record> further_expand;
+	/*
+		* state is already created in n.states
+		* todo:
+			* check if it is target, if so, add to set of final states, do not expand else do the following
+			* add probability distrs + rewards
+			* create follow_up for every next_state that is not already created in n.states
+	*/
+
+	mdp n;
+
+	n.actions = m.actions;
+
+	const auto get_augmented_state_name = [](const std::string& s, const rational_type& r) { return s + "_" + r.numerator().str(); };
+
+	const auto initial_state_name = std::string(get_augmented_state_name(m.initial, rational_type(0)));
+
+	n.states.insert(initial_state_name);
+	ordered_variables.push_back(initial_state_name);
+	n.initial = initial_state_name;
+
+	further_expand.emplace_back(m.initial, rational_type(0), initial_state_name);
+
+	while (!further_expand.empty())
+	{
+		further_expand_record expand = further_expand.front();
+		further_expand.pop_front();
+
+		//check target state
+		if (m.targets.find(expand.original_state_name) != m.targets.cend()) {
+			// this is target state
+			n.targets.insert(expand.augmented_state_name);
+			continue; // do not expand target states. They will be final.
+		}
+
+		// here we are at some non-target state...
+
+		for (const auto& choose_action : m.probabilities.at(expand.original_state_name)) {
+			const auto& action_name = choose_action.first;
+			const auto& distr = choose_action.second;
+
+			rational_type step_reward = rational_type(0);
+			try {
+				step_reward = m.rewards.at(expand.original_state_name).at(action_name);
+			}
+			catch (const std::out_of_range&) {
+				// ignore, it is 0 else alredy by definition line
+			}
+			rational_type m_next_rew = expand.accumulated_reward + step_reward;
+
+			n.rewards[expand.augmented_state_name][action_name] = step_reward; // func.func(m_next_rew) - func.func(expand.accumulated_reward); // FOR stupid_unfold use the value as it is
+			// we need to check if we passed threshold + delta_max....
+
+			for (const auto& choose_next_state : distr) {
+				const auto& next_state_name = choose_next_state.first;
+				const auto& prob = choose_next_state.second;
+
+				std::string augmented_next_state_name = get_augmented_state_name(next_state_name, m_next_rew);
+				// check if we passed threshold + delta_max....
+				if (m_next_rew >= cut_level || expand.augmented_state_name == expand.original_state_name) { // enhance this line also in the normal unfold version.
+					augmented_next_state_name = next_state_name;
+				}
+
+				// add the n_next_state to the todo-list (if we have not seen it before)
+				if (n.states.find(augmented_next_state_name) == n.states.cend()) {
+					n.states.insert(augmented_next_state_name);
+					ordered_variables.push_back(augmented_next_state_name);
+					further_expand.emplace_back(next_state_name, m_next_rew, augmented_next_state_name);
+				};
+
+				n.probabilities[expand.augmented_state_name][action_name][augmented_next_state_name] = prob;
 
 			}
 

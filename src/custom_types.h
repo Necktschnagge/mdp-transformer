@@ -95,13 +95,13 @@ public:
 
 class further_expand_record {
 public:
-	std::string new_state_name;
-	std::string old_state_name;
+	std::string augmented_state_name;
+	std::string original_state_name;
 	rational_type accumulated_reward;
 
-	further_expand_record(const std::string& old_state_name, rational_type accumulated_reward, const std::string& new_state_name) :
-		new_state_name(new_state_name),
-		old_state_name(old_state_name),
+	further_expand_record(const std::string& original_state_name, rational_type accumulated_reward, const std::string& augmented_state_name) :
+		augmented_state_name(augmented_state_name),
+		original_state_name(original_state_name),
 		accumulated_reward(accumulated_reward)
 	{}
 

@@ -176,10 +176,10 @@ public:
 
 class scheduler_container {
 public:
-	using scheduler = std::map<std::string, std::size_t>;
+	using scheduler = std::map<std::string, std::size_t>; // stationary scheduler: maps to each state the index of the action chosen in the state 
 
-	scheduler sched;
 	std::map<std::string, std::vector<std::string>> available_actions_per_state;
+	scheduler sched;
 
 };
 
@@ -348,6 +348,8 @@ void optimize_scheduler(mdp& m, const std::vector<std::string>& ordered_variable
 		standard_logger()->info("Found a scheduler improvement. Rerun stepwise improvement.");
 	}
 }
+
+
 class application_errors {
 public:
 	static constexpr std::size_t count_error_codes{ 13 };
@@ -565,8 +567,54 @@ public:
 
 };
 
+class quadratic : public modification {
 
-int run_starting_from_merged_json(const nlohmann::json& merged_json) { // do-check!
+	rational_type a;
+	rational_type t;
+
+	static const rational_type& max(const rational_type& l, const rational_type& r) {
+		return l > r ? l : r;
+	}
+	static const rational_type& min(const rational_type& l, const rational_type& r) {
+		return l < r ? l : r;
+	}
+public:
+	quadratic(const rational_type& a, const rational_type& t) : a(a), t(t) {}
+
+	virtual rational_type threshold() const override {
+		return t;
+	}
+
+	virtual rational_type func(const rational_type& arg) const override {
+		auto RATIONAL_ZERO{ rational_type(0) };
+		if (arg < t) {
+			return arg - a * (t - arg) * (t - arg) + max(RATIONAL_ZERO, t) * a * t;
+		}
+		else {
+			return arg + max(RATIONAL_ZERO, t) * a * t;
+		}
+	}
+
+};
+
+class identity : public modification {
+
+	rational_type t;
+
+public:
+	identity(const rational_type& t) : t(t) {}
+
+	virtual rational_type threshold() const override {
+		return t;
+	}
+
+	virtual rational_type func(const rational_type& arg) const override {
+		return arg;
+	}
+
+};
+
+int run_starting_from_merged_json(const nlohmann::json& merged_json) { // do-check!, ready but enhance the different cases -> common steps before might be inappropriate for other options
 	standard_logger()->info("Checking for validness of MDP (json -> MDP)...");
 
 	mdp m;
@@ -618,9 +666,9 @@ int run_starting_from_merged_json(const nlohmann::json& merged_json) { // do-che
 	if (!task_checks_ignore_negative_cycles_on_target_states) {
 		standard_logger()->warn("check for negative cycles on target states not available");
 	}
-	
+
 	standard_logger()->info("Check for certain MDP properties...");
-	
+
 	// check:no unreachable states / remove unreachable states and their transitions / rewards....
 	// also removes 0-probability transitions!!!
 	try {
@@ -662,6 +710,15 @@ int run_starting_from_merged_json(const nlohmann::json& merged_json) { // do-che
 	}
 
 	auto& calc_json{ merged_json.at(keywords::task).at(keywords::calc) };
+	if (calc_json.at(keywords::mode).get<std::string>() == keywords::value::classic.data()) {
+
+		std::vector<std::string> ordered_variables;
+		std::copy(m.states.cbegin(), m.states.cend(), std::back_inserter(ordered_variables));
+
+		optimize_scheduler(m, ordered_variables);
+		goto before_return;
+	}
+
 	if (calc_json.at(keywords::mode).get<std::string>() == keywords::value::crinkle.data()) {
 
 		rational_type t;
@@ -694,15 +751,109 @@ int run_starting_from_merged_json(const nlohmann::json& merged_json) { // do-che
 		n = unfold(m, c, delta_max, ordered_variables);
 
 		optimize_scheduler(n, ordered_variables);
+		goto before_return;
+	}
 
+	if (calc_json.at(keywords::mode).get<std::string>() == keywords::value::quadratic.data()) {
+
+		rational_type t;
+		rational_type a;
+		try {
+			json_task_error::check("mode_quadratic_has_t", calc_json.contains("t"));
+			json_task_error::check("mode_quadratic_has_t_string", calc_json.at("t").is_string());
+			t = string_to_rational_type(calc_json.at("t").get<std::string>());
+			json_task_error::check("mode_quadratic_has_a", calc_json.contains("a"));
+			json_task_error::check("mode_quadratic_has_a_string", calc_json.at("a").is_string());
+			a = string_to_rational_type(calc_json.at("a").get<std::string>());
+		}
+		catch (const json_task_error& e) {
+			standard_logger()->error(e.what());
+			const std::size_t error_code{ 8 };
+			standard_logger()->error(application_errors::application_error_messages[error_code].data());
+			return error_code;
+		}
+		catch (rational_parse_error& e) {
+			standard_logger()->error(e.what());
+			const std::size_t error_code{ 11 };
+			standard_logger()->error(application_errors::application_error_messages[error_code].data());
+			return error_code;
+		}
+		const auto c{ quadratic(a, t) };
+
+		mdp n;
+		std::vector<std::string> ordered_variables;
+		standard_logger()->info("Unfolding MDP...");
+		n = unfold(m, c, delta_max, ordered_variables);
+
+		optimize_scheduler(n, ordered_variables);
+		goto before_return;
 	}
-	else {
-		const std::size_t error_code{ 12 };
-		standard_logger()->error(application_errors::application_error_messages[error_code].data());
-		standard_logger()->error(std::string("json: task.calc.mode   ==   \"") + calc_json.at(keywords::mode).get<std::string>() + "\"");
-		return error_code;
-		// unknown task calc mode #### throw error
+
+	if (calc_json.at(keywords::mode).get<std::string>() == keywords::value::vVar_approach.data()) {
+
+		rational_type n; // maximum reward steps 
+		rational_type seconds; // seconds: if one approximation step takes longer then time, it will be the last one.
+
+		try {
+			json_task_error::check("mode_vVar_approach_has_n", calc_json.contains("n"));
+			json_task_error::check("mode_vVar_approach_has_n_string", calc_json.at("n").is_string());
+			n = string_to_rational_type(calc_json.at("n").get<std::string>());
+			json_task_error::check("mode_vVar_approach_has_seconds", calc_json.contains("seconds"));
+			json_task_error::check("mode_vVar_approach_has_seconds_string", calc_json.at("seconds").is_string());
+			seconds = string_to_rational_type(calc_json.at("seconds").get<std::string>());
+		}
+		catch (const json_task_error& e) {
+			standard_logger()->error(e.what());
+			const std::size_t error_code{ 8 };
+			standard_logger()->error(application_errors::application_error_messages[error_code].data());
+			return error_code;
+		}
+		catch (rational_parse_error& e) {
+			standard_logger()->error(e.what());
+			const std::size_t error_code{ 11 };
+			standard_logger()->error(application_errors::application_error_messages[error_code].data());
+			return error_code;
+		}
+
+		rational_type cut_level = std::min(rational_type(0), n);
+
+		while (!cut_level > n)
+		{
+			mdp stupid_unfolded_mdp;
+
+			std::vector<std::string> ordered_variables;
+			stupid_unfolded_mdp = stupid_unfold(m, cut_level, ordered_variables);
+
+				// unfold cut without changed rewards -> unfolded_mdp
+
+				// list all (exponential many) schedulers... -> vec_schedulers
+
+				// for x : vec__scheudlers:
+					// solve for expect values... mu
+					// modify unfolded_mdp for using poena quadratica (mu)
+					// solve for expect values .. result for this scheduler...
+		}
+
+/*
+		const auto c{identity(t)};
+
+		mdp n;
+		std::vector<std::string> ordered_variables;
+		standard_logger()->info("Unfolding MDP (stupid mode)...");
+		n = unfold(m, c, delta_max, ordered_variables);
+
+		optimize_scheduler(n, ordered_variables);
+*/
+		goto before_return;
 	}
+
+
+	// unknown task calc mode -> throw error
+	const std::size_t error_code{ 12 };
+	standard_logger()->error(application_errors::application_error_messages[error_code].data());
+	standard_logger()->error(std::string("json: task.calc.mode   ==   \"") + calc_json.at(keywords::mode).get<std::string>() + "\"");
+	return error_code;
+
 
 	// create unfold-mdp
 	//#### will break if in m state names use underscore
@@ -722,7 +873,7 @@ int run_starting_from_merged_json(const nlohmann::json& merged_json) { // do-che
 	// check for all nodes with multiple optimal solutions...
 
 	// json...
-
+before_return:
 	standard_logger()->info(application_errors::application_error_messages[0]); // no error
 	return 0;
 }
