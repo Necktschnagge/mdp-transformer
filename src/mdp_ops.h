@@ -131,7 +131,13 @@ public:
 	mdp_view(const mdp& m) : m(&m) {}
 
 	std::vector<std::string> get_actions_of(const std::string& state) {
-		auto result = std::vector<std::string>(m->probabilities.at(state).size());
+		std::vector<std::string> result;
+		try {
+			result = std::vector<std::string>(m->probabilities.at(state).size());
+		}
+		catch (std::out_of_range&) {
+			return result; // empty vector if there is no entry in probabilities for this state
+		}
 		std::transform(
 			m->probabilities.at(state).cbegin(),
 			m->probabilities.at(state).cend(),

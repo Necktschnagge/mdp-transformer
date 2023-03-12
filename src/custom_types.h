@@ -7,6 +7,7 @@
 #include <set>
 #include <map>
 
+using big_int_type = boost::multiprecision::cpp_int;
 using rational_type = boost::rational<boost::multiprecision::cpp_int>;
 
 

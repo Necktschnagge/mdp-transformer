@@ -9,6 +9,8 @@
 
 #include <nlohmann/json.hpp>
 
+#include <future>
+
 
 std::set<std::string> calc_reachable_states(const mdp& m) {
 
@@ -163,18 +165,18 @@ std::size_t get_index(const std::vector<std::string>& str_vec, const std::string
 }
 
 
-void create_matrix(const mdp& m, const std::vector<std::string>& ordered_variables, scheduler_container& cont, linear_systems::matrix& mat, linear_systems::rational_vector& rew, linear_systems::id_vector& unresolved, linear_systems::id_vector& resolved) {
+void create_matrix(const mdp& m, const std::vector<std::string>& ordered_variables, const scheduler_container& cont, linear_systems::matrix& mat, linear_systems::rational_vector& rew, linear_systems::id_vector& unresolved, linear_systems::id_vector& resolved) {
 
 	for (const auto& var : ordered_variables) {
 		const auto& line_var_id{ mat.size() };
-		if (cont.available_actions_per_state[var].empty()) { // it is a target state
+		if (cont.available_actions_per_state.at(var).empty()) { // it is a target state
 			rew.emplace_back(0);
 			linear_systems::matrix_line line = { { std::make_pair(line_var_id, rational_type(1)) } };
 			mat.emplace_back(std::move(line));
 		}
 		else { // it is no target state
-			const auto& action_id{ cont.sched[var] };
-			const auto action{ cont.available_actions_per_state[var][action_id] };
+			const auto& action_id{ cont.sched.at(var) };
+			const auto action{ cont.available_actions_per_state.at(var)[action_id] };
 			rew.emplace_back(m.rewards.at(var).at(action));
 			linear_systems::matrix_line line;
 			bool extra_diagonal_entry{ true };
@@ -571,8 +573,109 @@ public:
 
 };
 
-std::tuple<rational_type, std::vector <rational_type>, std::vector<scheduler_container>> check_all_exponential_schedulers_for_hVar(mdp& m, const mdp& first_unfolded_with_normal_rewwards, const rational_type& lambda, const rational_type& cut_level, const std::vector<std::string>& ordered_variables) {
-	
+auto count_combinations(const big_int_type& decision_layers, const big_int_type& remaining_units_to_distribute)->big_int_type {
+	if (decision_layers == 1) return big_int_type(1);
+
+	big_int_type accum = 0;
+	for (big_int_type r = 0; r < remaining_units_to_distribute + 1; r += 1) {
+		accum += count_combinations(decision_layers - 1, r);
+	}
+	return accum;
+};
+
+
+std::pair<mdp, bool> generate_mdp(std::size_t count_states, std::size_t count_target_states, std::size_t count_actions, rational_type probability_unit, big_int_type& resolve_nondeterminism, big_int_type min_reward, big_int_type past_max_reward) {
+	mdp m;
+	// we only need two actions without loss of generality
+
+	if (!(count_target_states < count_states) || !(count_target_states > 0) || (count_states < 1)) {
+		throw 0; // ### change error
+	}
+
+	const auto reziproke_prob = rational_type(1) / probability_unit;
+	if ((reziproke_prob).denominator() != 1) {
+		throw 1; // ### change error
+	}
+
+	for (std::size_t i = 0; i < count_states; ++i) {
+		m.states.insert("s" + std::to_string(i));
+	}
+
+	const auto get_state_name = [](std::size_t i) { return "s" + std::to_string(i); };
+	const auto get_action_name = [](std::size_t i) { return "alpha" + std::to_string(i); };
+
+	m.initial = "s0";
+	for (std::size_t i = count_states - count_target_states; i < count_states; ++i) {
+		m.targets.insert(get_state_name(i));
+	}
+
+	for (std::size_t i = 0; i < count_actions; ++i) {
+		m.states.insert(get_action_name(i));
+	}
+
+	std::size_t first_non_target_state = 0;
+	std::size_t behind_last_non_target_state = count_states - count_target_states;
+
+	big_int_type combinations = count_combinations(count_states, reziproke_prob.numerator());
+
+	// probability distributions...
+	for (std::size_t state = first_non_target_state; state != behind_last_non_target_state; ++state) {
+		for (std::size_t action = 0; action < count_actions; ++action) {
+
+			big_int_type decision_maker = resolve_nondeterminism % combinations;
+			resolve_nondeterminism /= combinations; // remove the information from resolve_nondeterminism
+
+			rational_type remaining_probability = rational_type(1);
+			for (std::size_t next_state = 0; next_state < count_states; ++next_state) {
+				if (1 == count_states - next_state) { // no decision left (one possibility available only)
+					m.probabilities[get_state_name(state)][get_action_name(action)][get_state_name(next_state)] = remaining_probability;
+				}
+				else {
+					big_int_type choose_prob_max = (remaining_probability / probability_unit).numerator(); // decide for one value of 0 ... choose_prob_max
+
+					for (big_int_type choose = 0; choose < choose_prob_max + 1; ++choose) {
+						const auto sub_cases_for_choosing_so = count_combinations(count_states - next_state - 1, choose_prob_max - choose);
+
+						if (!(decision_maker < sub_cases_for_choosing_so)) { // do not choose this way!
+							decision_maker -= sub_cases_for_choosing_so;
+							continue;
+						}
+
+						// let us choose the following probability.
+						rational_type p = probability_unit * choose;
+
+						m.probabilities[get_state_name(state)][get_action_name(action)][get_state_name(next_state)] = p;
+						remaining_probability -= p;
+						goto run_next_next_state;
+					}
+					// if here: error : decision_maker was too big. Miscalculation of number of combinations somewhere
+					throw 123;
+				}
+			run_next_next_state:
+				(int)3;
+			}
+		}
+	}
+
+	big_int_type possible_rewards = past_max_reward - min_reward;
+
+	// rewards ...
+	for (std::size_t state = first_non_target_state; state != behind_last_non_target_state; ++state) {
+		for (std::size_t action = 0; action < count_actions; ++action) {
+
+			big_int_type decision_maker = resolve_nondeterminism % possible_rewards;
+			resolve_nondeterminism /= possible_rewards; // remove the information from resolve_nondeterminism
+
+			m.rewards[get_state_name(state)][get_action_name(action)] = rational_type(min_reward + decision_maker);
+
+		}
+	}
+
+	return std::make_pair(m, resolve_nondeterminism > 0);
+}
+
+std::tuple<rational_type, std::vector <rational_type>, std::vector<scheduler_container>> check_all_exponential_schedulers_for_hVar(const mdp& m, const mdp& first_unfolded_with_normal_rewwards, const rational_type& lambda, const rational_type& cut_level, const std::vector<std::string>& ordered_variables) {
+
 	scheduler_container cont;
 
 	rational_type best_seen_result;
@@ -581,12 +684,18 @@ std::tuple<rational_type, std::vector <rational_type>, std::vector<scheduler_con
 	bool first_result_found{ false };
 	std::mutex access_optimal_values;
 
+	//std::list<std::thread> threads;
+	std::list<std::future<void>> the_futures;
+
 	cont.init(first_unfolded_with_normal_rewwards);
 
 	auto size_message = std::string("number of schedulers to be tested:   ") + cont.number_of_schedulers().numerator().str();
 	standard_logger()->trace(size_message);
 	do {
-		auto evaluate_one_scheduler = [&first_unfolded_with_normal_rewwards, &ordered_variables, &lambda, &m, &cont, &cut_level, &first_result_found, &best_seen_result, &mu_for_best_seen_result, &best_seen_scheduler]() { // cont
+		//const scheduler_container& cont_const_ref{ cont };
+
+		auto evaluate_one_scheduler = [&first_unfolded_with_normal_rewwards, &ordered_variables, &lambda, &m, &cut_level, &first_result_found, &best_seen_result, &mu_for_best_seen_result, &best_seen_scheduler, &access_optimal_values](const scheduler_container cont_const_ref) { //  
+
 			// to be filled in...
 			linear_systems::matrix mat;
 			linear_systems::rational_vector rew;
@@ -594,7 +703,7 @@ std::tuple<rational_type, std::vector <rational_type>, std::vector<scheduler_con
 			linear_systems::id_vector resolved;
 
 			// create matrix
-			create_matrix(first_unfolded_with_normal_rewwards, ordered_variables, cont, mat, rew, unresolved, resolved);
+			create_matrix(first_unfolded_with_normal_rewwards, ordered_variables, cont_const_ref, mat, rew, unresolved, resolved);
 
 
 			// solve matrix
@@ -621,7 +730,7 @@ std::tuple<rational_type, std::vector <rational_type>, std::vector<scheduler_con
 
 			std::vector<std::string> modified_ordered_variables;
 
-			scheduler_container cont2 = cont;
+			scheduler_container cont2 = cont_const_ref;
 
 			unfolded_cut_with_modified_rewards = modified_stupid_unfold(m, cut_level, modified_ordered_variables, modify, cont2);
 			{
@@ -644,6 +753,8 @@ std::tuple<rational_type, std::vector <rational_type>, std::vector<scheduler_con
 				std::size_t index_of_initial_state2 = std::find(modified_ordered_variables.cbegin(), modified_ordered_variables.cend(), unfolded_cut_with_modified_rewards.initial) - modified_ordered_variables.cbegin(); // initial state should be the first one, so == 0
 				rational_type current_mu_minus_hVar = current_solution_with_hVar[index_of_initial_state2];
 
+				const auto lock_access = std::lock_guard<std::mutex>(access_optimal_values);
+
 				if (!first_result_found || current_mu_minus_hVar > best_seen_result) {
 					first_result_found = true;
 					best_seen_result = current_mu_minus_hVar;
@@ -652,18 +763,37 @@ std::tuple<rational_type, std::vector <rational_type>, std::vector<scheduler_con
 				}
 				if (current_mu_minus_hVar == best_seen_result) {
 					mu_for_best_seen_result.push_back(current_mu);
-					best_seen_scheduler.push_back(cont);
+					best_seen_scheduler.push_back(cont_const_ref);
 
 				}
 			}
 		};
-		evaluate_one_scheduler();
+
+		if (!(the_futures.size() < feature_toggle::COUNT_THREADS)) {
+			while (true) {
+				for (auto iter = the_futures.begin(); iter != the_futures.end(); ++iter) {
+					if (iter->wait_for(std::chrono::milliseconds(0)) == std::future_status::ready) {
+						iter->wait();
+						the_futures.erase(iter); // iterator invalidation!
+						goto continue_6248974735;
+					}
+				}
+				std::this_thread::sleep_for(std::chrono::milliseconds(10));
+			}
+		}
+	continue_6248974735:
+
+		//threads.push_back(std::thread(evaluate_one_scheduler, cont));
+		the_futures.emplace_back(std::async(std::launch::async, evaluate_one_scheduler, cont));
 
 	} while (cont.operator++());
 
+	for (auto& f : the_futures) {
+		f.wait();
+	}
+
 	return std::make_tuple(best_seen_result, mu_for_best_seen_result, best_seen_scheduler);
 }
-
 
 
 
@@ -900,6 +1030,8 @@ int run_starting_from_merged_json(const nlohmann::json& merged_json) { // do-che
 		{
 			standard_logger()->trace(std::string("run on cut_level:   ") + cut_level.numerator().str() + "/" + cut_level.denominator().str());
 
+			auto timestamp_before_calculting = std::chrono::steady_clock::now();
+
 			// to be unfolded without any changed step rewards
 			mdp stupid_unfolded_mdp;
 
@@ -927,12 +1059,16 @@ int run_starting_from_merged_json(const nlohmann::json& merged_json) { // do-che
 					std::size_t // index of chosen action
 				> cut_end_scheduler; // to extract the scheduler of the self-catching sub mdp at cut_level...
 
+				std::map<std::string, std::string> cut_end_state_to_action_name;
+
 				std::vector<std::map<std::string, std::pair<std::string, rational_type>>::iterator> cut_end_states; // iterators to the cut_end_states
 
 				for (auto iter = augmented_state_to_pair.begin(); iter != augmented_state_to_pair.end(); ++iter) {
 					if (iter->second.second == cut_level) {
 						cut_end_states.push_back(iter);
 						cut_end_scheduler[iter->second.first] = optimal_scheds_vector[i].sched[iter->first];
+						auto& alll_actions_ath_this_state = optimal_scheds_vector[i].available_actions_per_state[iter->first];
+						cut_end_state_to_action_name[iter->second.first] = alll_actions_ath_this_state.empty() /* trap state */ ? "--NONE--" : alll_actions_ath_this_state[cut_end_scheduler[iter->second.first]]; // action name
 					}
 				}
 
@@ -963,16 +1099,29 @@ int run_starting_from_merged_json(const nlohmann::json& merged_json) { // do-che
 				// @here we have calculated the distance of stabilization...
 				optimal_cut_end_schedulers_and_stabilization_distance.emplace_back(stabilization_distance, cut_end_scheduler);
 
-				std::string message1 = "cut_level:   " + cut_level.numerator().str() + "/" + cut_level.denominator().str() + "\n";
-				std::string message2 = "stabilisation distance:   " + stabilization_distance.numerator().str() + "/" + stabilization_distance.denominator().str() + "\n";
+				auto message1 = std::string("cut_level:   ") + cut_level.numerator().str() + "/" + cut_level.denominator().str() + "\n";
+				auto message2 = std::string("stabilisation distance:   ") + optimal_cut_end_schedulers_and_stabilization_distance.back().first.numerator().str() + "/" + optimal_cut_end_schedulers_and_stabilization_distance.back().first.denominator().str() + "\n";
+				auto message3 = std::string("end component scheduler:\n") + nlohmann::json(cut_end_state_to_action_name).dump(3);
+				auto message4 = std::string("+++++++++++++++++++++++\n");
+
 				//std::string message3 = "cut_end_scheduler: ...";
-				standard_logger()->info(message1 + message2);
+
+				standard_logger()->info(message1 + message2 + message3 + message4);
 
 			}
-			standard_logger()->info("--------------------------------------------");
+			std::string message3 = "\n count optimal schedulers: " + number_of_optimal_scheds;
+			standard_logger()->info(message3);
+
+			standard_logger()->info("-------------------------------------------------------------------------------------");
+			auto timestamp_after_calculting = std::chrono::steady_clock::now();
+			if (timestamp_after_calculting - timestamp_before_calculting > std::chrono::seconds(seconds.numerator().convert_to<unsigned long long>())) {
+				standard_logger()->warn("exiting because of timeout");
+				goto continue_82757928765;
+			}
 
 			cut_level += rational_type(1); // ##### introduce step variable t364698234764325847
 		}
+	continue_82757928765:
 		goto before_return;
 	}
 
