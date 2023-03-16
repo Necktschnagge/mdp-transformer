@@ -1125,11 +1125,12 @@ int run_starting_from_merged_json(const nlohmann::json& merged_json) { // do-che
 
 
 	// unknown task calc mode -> throw error
-	const std::size_t error_code{ 12 };
-	standard_logger()->error(application_errors::application_error_messages[error_code].data());
-	standard_logger()->error(std::string("json: task.calc.mode   ==   \"") + calc_json.at(keywords::mode).get<std::string>() + "\"");
-	return error_code;
-
+	{
+		const std::size_t error_code{ 12 };
+		standard_logger()->error(application_errors::application_error_messages[error_code].data());
+		standard_logger()->error(std::string("json: task.calc.mode   ==   \"") + calc_json.at(keywords::mode).get<std::string>() + "\"");
+		return error_code;
+	}
 
 	// create unfold-mdp
 	//#### will break if in m state names use underscore
