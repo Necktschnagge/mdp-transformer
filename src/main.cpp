@@ -633,26 +633,24 @@ std::pair<mdp, bool> generate_mdp(std::size_t count_states, std::size_t count_ta
 				else {
 					big_int_type choose_prob_max = (remaining_probability / probability_unit).numerator(); // decide for one value of 0 ... choose_prob_max
 
-					for (big_int_type choose = 0; choose < choose_prob_max + 1; ++choose) {
+					for (big_int_type choose = 0; choose <= choose_prob_max; ++choose) {
 						const auto sub_cases_for_choosing_so = count_combinations(count_states - next_state - 1, choose_prob_max - choose);
 
-						if (!(decision_maker < sub_cases_for_choosing_so)) { // do not choose this way!
-							decision_maker -= sub_cases_for_choosing_so;
-							continue;
+						if (decision_maker < sub_cases_for_choosing_so) { // choose this way!     we take probability_unit * choose
+							// let us choose the following probability.
+							rational_type p = probability_unit * choose;
+
+							m.probabilities[get_state_name(state)][get_action_name(action)][get_state_name(next_state)] = p;
+							remaining_probability -= p;
+							break;
 						}
-
-						// let us choose the following probability.
-						rational_type p = probability_unit * choose;
-
-						m.probabilities[get_state_name(state)][get_action_name(action)][get_state_name(next_state)] = p;
-						remaining_probability -= p;
-						goto run_next_next_state;
+						decision_maker -= sub_cases_for_choosing_so;
+						if (choose == choose_prob_max) { // we are already at maximal possible chosen probability but we do not select this one.
+							// if here: error : decision_maker was too big. Miscalculation of number of combinations somewhere
+							throw 123; // ### improve error messages!
+						}
 					}
-					// if here: error : decision_maker was too big. Miscalculation of number of combinations somewhere
-					throw 123;
 				}
-			run_next_next_state:
-				(int)3;
 			}
 		}
 	}
