@@ -428,7 +428,7 @@ inline std::map<std::string, rational_type> calc_delta_max_state_wise(const mdp&
 						if (result[state] != update)
 							continue_loop = true;
 						result[state] = update;
-						if (update <= m.negative_loop_delta_threshold()) {
+						if (update < m.negative_loop_delta_threshold()) {
 							if (error_on_negative_loop) {
 								throw found_negative_loop("Found negative loop while determining delta max.");
 							}

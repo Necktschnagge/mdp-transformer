@@ -89,7 +89,7 @@ public:
 	}
 
 	rational_type negative_loop_delta_threshold() const {
-		return rational_type(states.size()) * min_reward();
+		return (rational_type(states.size()) - 1) * min_reward();
 	}
 
 };

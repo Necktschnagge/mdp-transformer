@@ -1,0 +1,32 @@
+{
+  "states": [
+    "start",
+    "end"
+  ],
+  "actions": [
+    "high_reward",
+    "low_reward"
+  ],
+  "probabilities": {
+    "start": {
+      "high_reward": {
+        "start": "2/3",
+        "end": "1/3"
+      },
+      "low_reward": {
+        "start": "9/10",
+        "end": "1/10"
+      }
+    }
+  },
+  "initial": "start",
+  "rewards": {
+    "start": {
+      "high_reward": "3",
+      "low_reward": "1"
+    }
+  },
+  "targets": [
+    "end"
+  ]
+}
