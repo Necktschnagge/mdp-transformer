@@ -581,7 +581,7 @@ auto count_combinations(const big_int_type& decision_layers, const big_int_type&
 		accum += count_combinations(decision_layers - 1, r);
 	}
 	return accum;
-};
+}
 
 
 std::pair<mdp, bool> generate_mdp(std::size_t count_states, std::size_t count_target_states, std::size_t count_actions, rational_type probability_unit, big_int_type& resolve_nondeterminism, big_int_type min_reward, big_int_type past_max_reward) {
@@ -1107,7 +1107,7 @@ int run_starting_from_merged_json(const nlohmann::json& merged_json) { // do-che
 				standard_logger()->info(message1 + message2 + message3 + message4);
 
 			}
-			std::string message3 = "\n count optimal schedulers: " + number_of_optimal_scheds;
+			std::string message3 = "\n count optimal schedulers: " + std::to_string(number_of_optimal_scheds);
 			standard_logger()->info(message3);
 
 			standard_logger()->info("-------------------------------------------------------------------------------------");
