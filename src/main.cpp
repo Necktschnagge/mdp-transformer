@@ -1207,6 +1207,7 @@ int main(int argc, char* argv[])// ready
 			const auto example_path = std::string("../../src/test.json");
 			const auto b1_path = std::string("../../res/B-1.json");
 			const auto task_classic = std::string("../../res/task_classic.json");
+			const auto task_crinkle_t3_r10 = std::string("../../res/task_classic.json");
 
 			auto all_jsons = std::vector<std::string>{ b1_path, task_classic };
 			return load_jsons_and_run(all_jsons);
