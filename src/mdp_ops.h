@@ -91,6 +91,9 @@ inline mdp unfold(const mdp& m, const _Modification& func, const std::map<std::s
 			catch (const std::out_of_range&) {
 				// ignore, it is 0 else alredy by definition line
 			}
+
+			standard_logger()->trace(expand.accumulated_reward.numerator().str() + "  " + step_reward.numerator().str());
+
 			rational_type m_next_rew = expand.accumulated_reward + step_reward;
 
 			n.rewards[expand.augmented_state_name][action_name] = func.func(m_next_rew) - func.func(expand.accumulated_reward); // is always okay.
@@ -102,7 +105,8 @@ inline mdp unfold(const mdp& m, const _Modification& func, const std::map<std::s
 
 				std::string new_next_state_name = get_new_state_name(next_state_name, m_next_rew);
 				// check if we passed threshold + delta_max....
-				if (m_next_rew > func.threshold() + delta_max.at(next_state_name)) { // or current state is alredy in cut mode (se how it is solved in stupid_unfold)
+				standard_logger()->trace(std::string("check bounds : ") + func.threshold().numerator().str() + " .... " + delta_max.at(next_state_name).numerator().str());
+				if (m_next_rew >= func.threshold() + delta_max.at(next_state_name)) { // or current state is alredy in cut mode (se how it is solved in stupid_unfold)
 					new_next_state_name = next_state_name;
 				}
 
@@ -422,7 +426,7 @@ inline std::map<std::string, rational_type> calc_delta_max_state_wise(const mdp&
 				for (const auto& action_tree : actions) {
 					for (const auto& next_state_pair : action_tree.second) {
 						rational_type update = std::max(
-							m.negative_loop_delta_threshold(),
+							m.negative_loop_delta_threshold() - rational_type(1),
 							std::min(result[state], result[next_state_pair.first] + m.rewards.at(state).at(action_tree.first)) // building MDP ensures an entry for every state,action, even if left in json
 						);
 						if (result[state] != update)

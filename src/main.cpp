@@ -931,6 +931,8 @@ int run_starting_from_merged_json(const nlohmann::json& merged_json) { // do-che
 		standard_logger()->info("Unfolding MDP...");
 		n = unfold(m, c, delta_max, ordered_variables);
 
+		standard_logger()->trace(mdp_to_json(n).dump(3));
+
 		optimize_scheduler(n, ordered_variables);
 		goto before_return;
 	}
@@ -1207,9 +1209,9 @@ int main(int argc, char* argv[])// ready
 			const auto example_path = std::string("../../src/test.json");
 			const auto b1_path = std::string("../../res/B-1.json");
 			const auto task_classic = std::string("../../res/task_classic.json");
-			const auto task_crinkle_t3_r10 = std::string("../../res/task_classic.json");
+			const auto task_crinkle_t3_r10 = std::string("../../res/task_crinkle_t3_r10.json");
 
-			auto all_jsons = std::vector<std::string>{ b1_path, task_classic };
+			auto all_jsons = std::vector<std::string>{ b1_path, task_crinkle_t3_r10 };
 			return load_jsons_and_run(all_jsons);
 		}
 		else {
