@@ -294,9 +294,38 @@ void optimize_scheduler(mdp& m, const std::vector<std::string>& ordered_variable
 		}
 
 		if (!found_improvement) {
-			standard_logger()->info("The following memoryless deterministic scheduler is optimal:");
-			for (const auto& decision : cont.sched) {
-				standard_logger()->info(std::string("At state  ") + decision.first + "  :  " + cont.available_actions_per_state[decision.first][decision.second]);
+			// check for multiple optimal schedulers...
+			scheduler_container::multi_scheduler s;
+
+			for (auto var = ordered_variables.cbegin(); var != ordered_variables.cend(); ++var) {
+				if (cont.available_actions_per_state[*var].empty()) { // no action to choose...
+					continue;
+				}
+				linear_systems::var_id var_id = var - ordered_variables.cbegin();
+				auto best_seen_value = current_solution[var_id];
+
+				//auto select_action = cont.sched[*var]; //?
+				for (auto action = cont.available_actions_per_state[*var].cbegin(); action != cont.available_actions_per_state[*var].cend(); ++action) {
+					std::size_t action_id = action - cont.available_actions_per_state[*var].cbegin();
+					auto& distr = m.probabilities[*var][*action];
+					rational_type accummulated{ m.rewards[*var][*action] };
+					for (const auto& state_paired_prob : distr) {
+						accummulated += state_paired_prob.second * current_solution[get_index(ordered_variables, state_paired_prob.first)];
+					}
+					if (accummulated == best_seen_value) {
+						s[*var].push_back(action_id);
+					}
+				}
+			}
+
+			// output optimal schedulers
+			standard_logger()->info("The following memoryless deterministic scheduler(s) is/are optimal:");
+			for (const auto& decision : s) {
+				std::string schedulers_string;
+				for (auto action_id : decision.second) {
+					schedulers_string += cont.available_actions_per_state[decision.first][action_id] + "   ";
+				}
+				standard_logger()->info(std::string("At state  ") + decision.first + "  :  " + schedulers_string);
 			}
 			standard_logger()->info("The following expectations per state are optimal:");
 			for (std::size_t i = 0; i < current_solution.size(); ++i) {

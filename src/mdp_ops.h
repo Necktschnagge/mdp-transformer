@@ -158,6 +158,7 @@ public:
 class scheduler_container {
 public:
 	using scheduler = std::map<std::string, std::size_t>; // stationary scheduler: maps to each state the index of the action chosen in the state 
+	using multi_scheduler = std::map<std::string, std::vector<std::size_t>>; // stationary scheduler: maps to each state the index of the action chosen in the state 
 
 	std::map<std::string, std::vector<std::string>> available_actions_per_state;
 	scheduler sched;
