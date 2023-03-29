@@ -340,7 +340,7 @@ void optimize_scheduler(mdp& m, const std::vector<std::string>& ordered_variable
 
 class application_errors {
 public:
-	static constexpr std::size_t count_error_codes{ 13 };
+	static constexpr std::size_t count_error_codes{ 14 };
 	inline static const std::array<std::string_view, count_error_codes> application_error_messages{ {
 		std::string_view("Ordinary EXIT"), // 0
 		std::string_view("Internal error: called with ZERO arguments") , // 1
@@ -354,7 +354,8 @@ public:
 		std::string_view("Found unreachable state(s)"), // 9
 		std::string_view("Found state(s) where reaching target is not guaranteed"), // 10
 		std::string_view("Crinkle values error"), // 11
-		std::string_view("Unknown calc mode. Don't know what to do") // 12
+		std::string_view("Unknown calc mode. Don't know what to do"), // 12
+		std::string_view("Cannot parse rational value from json") // 13
 		}
 	};
 
@@ -822,6 +823,80 @@ std::tuple<rational_type, std::vector <rational_type>, std::vector<scheduler_con
 	return std::make_tuple(best_seen_result, mu_for_best_seen_result, best_seen_scheduler);
 }
 
+std::size_t number_of_steps_in_mdp_to_reach_goal_with_at_least(const mdp& m, rational_type probability) {
+	std::map<std::string, std::vector<rational_type>> states_to_min_probabilities; // state s |-> [p0, p1, p2, p3, p4, ... ]
+		// p_i is the minimum probability to reach a goal state t for the first time after  i steps or even earlier.
+
+	//auto accumulated_probability_to_reach_goal_within_i_steps_starting_from_initial_state{ rational_type(0) };
+
+	for (const auto& s : m.states) {
+		states_to_min_probabilities[s].push_back(0); // for all non-target states we are in a target state after ZERO steps with at least probability 0. (always asking for the scheduler that lets us loop without reaching goal as long as possible)
+	}
+	for (const auto& t : m.targets) { // overwrite the initial value for target states
+		states_to_min_probabilities[t].back() = rational_type(1); // for all target states we are in a target state after ZERO steps with excatly probability 1.
+	}
+	//accumulated_probability_to_reach_goal_within_i_steps_starting_from_initial_state += states_to_min_probabilities[m.initial][0];
+
+	std::size_t last_filled_index{ 0 }; // 0... already filled. loop will increment at first step
+	while (states_to_min_probabilities[m.initial].back() < probability) {
+
+		for (auto& pair : states_to_min_probabilities) {
+			if (pair.second[0] == rational_type(1)) {// is target state
+				pair.second.push_back(rational_type(1)); // already reaching goal earlier (with zero steps)
+			}
+			else { // non-target state
+				rational_type min_probability{ 1 };
+				auto& distributions{ m.probabilities.at(pair.first) };
+				if (distributions.empty()) {
+					min_probability = 0;
+				}
+				for (const auto& action_paired_distr : distributions) { // look for the worst action, worst == reach goal within x steps with least probability
+					// check for  the probability to reach goal in at least one step, but with [0... x-1] more steps...
+					min_probability = std::min(
+						min_probability,
+						std::accumulate(action_paired_distr.second.cbegin(), action_paired_distr.second.cend(), rational_type(0),
+							[&](const rational_type& acc, const std::pair<std::string, rational_type>& state_probability_pair) {
+								return acc + state_probability_pair.second * states_to_min_probabilities[state_probability_pair.first][last_filled_index];
+								// for each consecutive state add probability to enter this state times probability to reach goal in the remaining steps.
+							}) // iterate all next_states
+					);
+				}
+				pair.second.push_back(min_probability);
+			}
+		}
+		++last_filled_index;
+	}
+	return last_filled_index;
+}
+
+rational_type maximal_weight_after_n_steps(const mdp& m, std::size_t n_steps) {
+	std::map<std::string, rational_type> state_to_maximum_reward_when_here;
+
+	state_to_maximum_reward_when_here[m.initial] = rational_type(0);
+
+	for (std::size_t i = 0; i < n_steps; ++i) {
+		std::map<std::string, rational_type> next_values{ state_to_maximum_reward_when_here };
+		for (const auto& state_with_value : state_to_maximum_reward_when_here) {
+			for (const auto& action_paired_distr : m.probabilities.at(state_with_value.first)) {
+				for (const auto& next_state_paired_probability : action_paired_distr.second) {
+					auto find_iter = next_values.find(next_state_paired_probability.first);
+					const auto update_value{ state_with_value.second + m.rewards.at(state_with_value.first).at(action_paired_distr.first) };
+					if (find_iter == next_values.cend()) {
+						next_values[next_state_paired_probability.first] = update_value;
+					}
+					else {
+						next_values[next_state_paired_probability.first] = std::max(next_values[next_state_paired_probability.first], update_value);
+					}
+				}
+			}
+		}
+		state_to_maximum_reward_when_here = next_values;
+	}
+	return std::accumulate(state_to_maximum_reward_when_here.cbegin(), state_to_maximum_reward_when_here.cend(), rational_type(0),
+		[](const rational_type& acc, const decltype(state_to_maximum_reward_when_here)::iterator::value_type& pair) {
+			return std::max(acc, pair.second);
+		});
+}
 
 
 int run_starting_from_merged_json(const nlohmann::json& merged_json) { // do-check!, ready but enhance the different cases -> common steps before might be inappropriate for other options
@@ -920,7 +995,7 @@ int run_starting_from_merged_json(const nlohmann::json& merged_json) { // do-che
 	}
 
 	auto& calc_json{ merged_json.at(keywords::task).at(keywords::calc) };
-	if (calc_json.at(keywords::mode).get<std::string>() == keywords::value::classic.data()) {
+	if (calc_json.at(keywords::mode).get<std::string>() == keywords::value::classic.data()) { // classical SSP-Problem
 
 		std::vector<std::string> ordered_variables;
 		std::copy(m.states.cbegin(), m.states.cend(), std::back_inserter(ordered_variables));
@@ -929,7 +1004,7 @@ int run_starting_from_merged_json(const nlohmann::json& merged_json) { // do-che
 		goto before_return;
 	}
 
-	if (calc_json.at(keywords::mode).get<std::string>() == keywords::value::crinkle.data()) {
+	if (calc_json.at(keywords::mode).get<std::string>() == keywords::value::crinkle.data()) { // crinkle Problem
 
 		rational_type t;
 		rational_type r;
@@ -966,7 +1041,7 @@ int run_starting_from_merged_json(const nlohmann::json& merged_json) { // do-che
 		goto before_return;
 	}
 
-	if (calc_json.at(keywords::mode).get<std::string>() == keywords::value::quadratic.data()) {
+	if (calc_json.at(keywords::mode).get<std::string>() == keywords::value::quadratic.data()) { // quadratically penalized Problem
 
 		rational_type t;
 		rational_type a;
@@ -1001,7 +1076,7 @@ int run_starting_from_merged_json(const nlohmann::json& merged_json) { // do-che
 		goto before_return;
 	}
 
-	if (calc_json.at(keywords::mode).get<std::string>() == keywords::value::hVar_approach.data()) {
+	if (calc_json.at(keywords::mode).get<std::string>() == keywords::value::hVar_approach.data()) { // approach for hVar
 
 		rational_type n; // maximum reward steps 
 		rational_type seconds; // seconds: if one approximation step takes longer then time, it will be the last one.
@@ -1072,7 +1147,7 @@ int run_starting_from_merged_json(const nlohmann::json& merged_json) { // do-che
 			stupid_unfolded_mdp = stupid_unfold(m, cut_level, ordered_variables, augmented_state_to_pair); // unfolding without any reward changes
 			standard_logger()->trace("Done: stupid_unfold");
 
-			auto tup = check_all_exponential_schedulers_for_hVar(m, stupid_unfolded_mdp, lambda, cut_level, ordered_variables); //trys all schedulers and returns the ones leading to maximum expected mu-hVar.
+			auto tup = check_all_exponential_schedulers_for_hVar(m, stupid_unfolded_mdp, lambda, cut_level, ordered_variables); // tries all schedulers and returns the ones leading to maximum expected mu-hVar.
 			standard_logger()->trace("Done: exponential scheduler check");
 
 			cut_level_to_optimal_solutions.push_back(std::make_tuple(cut_level, std::move(tup), std::vector<std::pair<rational_type, std::map<std::string, std::size_t>>>()));
@@ -1153,7 +1228,209 @@ int run_starting_from_merged_json(const nlohmann::json& merged_json) { // do-che
 	continue_82757928765:
 		goto before_return;
 	}
+	if (calc_json.at(keywords::mode).get<std::string>() == keywords::value::hVar_approach_percentage_cut.data()) { // percentage cut solving
 
+		//## do all the things here
+		rational_type probability_of_reaching_goal;
+		//rational_type a;
+		try {
+			json_task_error::check("mode_hVar_approach_percentage_cut_has_prob", calc_json.contains("prob"));
+			json_task_error::check("mode_hVar_approach_percentage_has_prob_string", calc_json.at("prob").is_string());
+			probability_of_reaching_goal = string_to_rational_type(calc_json.at("prob").get<std::string>());
+			//json_task_error::check("mode_quadratic_has_a", calc_json.contains("a"));
+			//json_task_error::check("mode_quadratic_has_a_string", calc_json.at("a").is_string());
+			//a = string_to_rational_type(calc_json.at("a").get<std::string>());
+		}
+		catch (const json_task_error& e) {
+			standard_logger()->error(e.what());
+			const std::size_t error_code{ 8 };
+			standard_logger()->error(application_errors::application_error_messages[error_code].data());
+			return error_code;
+		}
+		catch (rational_parse_error& e) {
+			standard_logger()->error(e.what());
+			const std::size_t error_code{ 13 };
+			standard_logger()->error(application_errors::application_error_messages[error_code].data());
+			return error_code;
+		}
+
+		std::size_t steps_needed = number_of_steps_in_mdp_to_reach_goal_with_at_least(m, probability_of_reaching_goal);
+
+		standard_logger()->info(std::string("Minimum number of steps needed to satisfy probability constraint:  ") + std::to_string(steps_needed));
+
+		//rational_type n; // maximum reward steps 
+		//rational_type seconds; // seconds: if one approximation step takes longer then time, it will be the last one.
+		rational_type lambda; // lambda factor.
+
+		try {
+			//json_task_error::check("mode_vVar_approach_has_n", calc_json.contains("n"));
+			//json_task_error::check("mode_vVar_approach_has_n_string", calc_json.at("n").is_string());
+			//n = string_to_rational_type(calc_json.at("n").get<std::string>());
+			//json_task_error::check("mode_vVar_approach_has_seconds", calc_json.contains("seconds"));
+			//json_task_error::check("mode_vVar_approach_has_seconds_string", calc_json.at("seconds").is_string());
+			//seconds = string_to_rational_type(calc_json.at("seconds").get<std::string>());
+			json_task_error::check("mode_vVar_approach_has_lambda", calc_json.contains("lambda"));
+			json_task_error::check("mode_vVar_approach_has_lambda_string", calc_json.at("lambda").is_string());
+			lambda = string_to_rational_type(calc_json.at("lambda").get<std::string>());
+		}
+		catch (const json_task_error& e) {
+			standard_logger()->error(e.what());
+			const std::size_t error_code{ 8 };
+			standard_logger()->error(application_errors::application_error_messages[error_code].data());
+			return error_code;
+		}
+		catch (rational_parse_error& e) {
+			standard_logger()->error(e.what());
+			const std::size_t error_code{ 11 };
+			standard_logger()->error(application_errors::application_error_messages[error_code].data());
+			return error_code;
+		}
+		standard_logger()->info("ready reading params!");
+
+		rational_type weight_threshold{ maximal_weight_after_n_steps(m, steps_needed) };
+
+
+
+
+		rational_type cut_level = weight_threshold;
+
+#if false
+		std::tuple<
+			rational_type, // cut level
+			std::tuple<
+			rational_type, // hVar optimal value
+			std::vector <rational_type>, // mu of optimal schedulers
+			std::vector<scheduler_container> // optimal schedulers
+			>,
+			std::vector<
+			std::pair<
+			rational_type, // stabilisation distance
+			std::map<
+			std::string, // original state name
+			std::size_t // index of chosen action
+			> // cut end scheduler
+			>
+			> //
+		> optimal_solutions;
+#endif
+
+		// use increasing cut_level until n
+
+		standard_logger()->trace(std::string("run on cut_level:   ") + cut_level.numerator().str() + "/" + cut_level.denominator().str());
+
+		auto timestamp_before_calculting = std::chrono::steady_clock::now();
+
+		// to be unfolded without any changed step rewards
+		mdp stupid_unfolded_mdp;
+
+		std::vector<std::string> ordered_variables;
+		std::map<std::string, // augmented state
+			std::pair<std::string, rational_type> // original state, reward accum.
+		> augmented_state_to_pair; // just to quickly get original state and accum reward out of a augmented state.
+
+		stupid_unfolded_mdp = stupid_unfold(m, cut_level, ordered_variables, augmented_state_to_pair); // unfolding without any reward changes
+		standard_logger()->trace("Done: stupid_unfold");
+
+		// best seen penalized expectation, seen classical expectations, seen matching schedulers
+		std::tuple<rational_type, std::vector <rational_type>, std::vector<scheduler_container>> tup =
+			check_all_exponential_schedulers_for_hVar(m, stupid_unfolded_mdp, lambda, cut_level, ordered_variables); // tries all schedulers and returns the ones leading to maximum expected mu-hVar.
+		standard_logger()->trace("Done: exponential scheduler check");
+
+		//optimal_solutions = std::make_tuple(cut_level, std::move(tup), std::vector<std::pair<rational_type, std::map<std::string, std::size_t>>>());
+
+		auto& optimal_scheds_vector{ std::get<2>(tup) };
+		auto optimal_cut_end_schedulers_and_stabilization_distance{ std::vector<std::pair<rational_type, std::map<std::string, std::size_t>>>() };
+
+		const std::size_t number_of_optimal_scheds = optimal_scheds_vector.size();
+
+		standard_logger()->info(std::string("Number of optimal schedulers found:   ") + std::to_string(number_of_optimal_scheds));
+
+		for (std::size_t i = 0; i < number_of_optimal_scheds; ++i) { // iterate all optimal schedulers...
+
+			standard_logger()->info(std::string("Presenting optimal scheduler  #") + std::to_string(i));
+
+			std::map<std::string, // original state name
+				std::size_t // index of chosen action
+			> cut_end_scheduler; // to extract the scheduler of the self-catching sub mdp at cut_level...
+
+			std::map<std::string, std::string> cut_end_state_to_action_name;
+
+			std::vector<std::map<std::string, std::pair<std::string, rational_type>>::iterator> cut_end_states; // iterators to the cut_end_states inside augmented_state_to_pair
+
+			for (auto iter = augmented_state_to_pair.begin(); iter != augmented_state_to_pair.end(); ++iter) {
+				if (iter->second.second == cut_level) { // if it is a state of the cut component
+					cut_end_states.push_back(iter);
+					cut_end_scheduler[iter->second.first] = optimal_scheds_vector[i].sched[iter->first]; // original state name  |-> scheduler decision using iterator inside scheduler container
+					auto& all_actions_at_this_state = optimal_scheds_vector[i].available_actions_per_state[iter->first];
+					cut_end_state_to_action_name[iter->second.first] = all_actions_at_this_state.empty() // trap state
+						? "--NONE--" :
+						all_actions_at_this_state[cut_end_scheduler[iter->second.first]]; // action name
+				}
+			}
+			standard_logger()->info("The following scheduler decisions are optimal for the cut component:");
+			for (const auto& pair : cut_end_state_to_action_name) {
+				standard_logger()->info(pair.first + " :   " + pair.second);
+			}
+
+			std::map<std::string, std::string> reward_based_scheduler_map;
+			for (auto iter = augmented_state_to_pair.begin(); iter != augmented_state_to_pair.end(); ++iter) {
+
+					auto& all_actions_at_this_state = optimal_scheds_vector[i].available_actions_per_state[iter->first];
+
+					reward_based_scheduler_map[iter->first] = all_actions_at_this_state.empty() // trap state
+						? "--NONE--" :
+						all_actions_at_this_state[optimal_scheds_vector[i].sched[iter->first]]; // action name
+			}
+
+			standard_logger()->info("The following scheduler decisions are optimal for the approximation scenario:");
+			standard_logger()->info(nlohmann::json(reward_based_scheduler_map).dump(3));
+
+
+			// check for stabilizing distance...
+
+			rational_type stabilization_distance{ 0 };
+			bool abort = false;
+			while (!abort && stabilization_distance <= cut_level) {
+				rational_type check_stab_distance = stabilization_distance + rational_type{ 1 }; ///#### alllow another distance t364698234764325847
+
+				for (auto iter = augmented_state_to_pair.begin(); iter != augmented_state_to_pair.end(); ++iter) {
+					if (iter->second.second >= check_stab_distance && iter->second.second < stabilization_distance) {
+						// check if the states in this range are stabilized with cut end scheduler:
+
+						if (
+							optimal_scheds_vector[i].sched[iter->first] != cut_end_scheduler[iter->second.first] // if scheduler decides not the stabilized way
+							) {
+							abort = true;
+						}
+					}
+				}
+
+				if (!abort) {
+					stabilization_distance = check_stab_distance;
+				}
+			}
+
+			// @here we have calculated the distance of stabilization...
+			//optimal_cut_end_schedulers_and_stabilization_distance.emplace_back(stabilization_distance, cut_end_scheduler);
+
+			auto message1 = std::string("cut_level:   ") + cut_level.numerator().str() + "/" + cut_level.denominator().str() + "\n";
+			auto message2 = std::string("stabilisation distance:   ") + stabilization_distance.numerator().str() + "/" + stabilization_distance.denominator().str() + "\n";
+			auto message3 = std::string("cut component scheduler:\n") + nlohmann::json(cut_end_state_to_action_name).dump(3);
+			auto message4 = std::string("+++++++++++++++++++++++\n");
+
+			//std::string message3 = "cut_end_scheduler: ...";
+
+			standard_logger()->info(message1 + message2 + message3 + message4);
+
+		}
+		std::string message3 = "\n count optimal schedulers: " + std::to_string(number_of_optimal_scheds);
+		standard_logger()->info(message3);
+
+		standard_logger()->info("-------------------------------------------------------------------------------------");
+		auto timestamp_after_calculting = std::chrono::steady_clock::now();
+
+		goto before_return;
+	}
 
 	// unknown task calc mode -> throw error
 	{
