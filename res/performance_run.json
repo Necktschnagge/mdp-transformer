@@ -1,0 +1,32 @@
+{
+  "states": [
+    "t"
+  ],
+  "actions": [
+    "a"
+  ],
+  "probabilities": {
+  },
+  "initial": "t",
+  "rewards": {
+  },
+  "targets": [
+    "t"
+  ],
+  "task": {
+    "checks": {
+      "no-unreachable-states": true,
+      "reaching-target-with-probability-1": true,
+      "no-negative-cycles": true,
+      "ignore-negative-cycles-on-target-states": true
+    },
+    "calc": {
+      "mode": "generatePerformance",
+      "t": "50",
+      "r": "5",
+      "max_states": "32",
+      "count_actions": "2",
+      "probability_unit": "1/3"
+    }
+  }
+}

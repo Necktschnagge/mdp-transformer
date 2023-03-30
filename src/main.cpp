@@ -226,6 +226,7 @@ void create_matrix(const mdp& m, const std::vector<std::string>& ordered_variabl
 	unresolved.erase(new_end, unresolved.end());
 }
 
+template <bool WRITE_LOG = true>
 void optimize_scheduler(mdp& m, const std::vector<std::string>& ordered_variables) { // do-check!
 	scheduler_container cont;
 
@@ -282,7 +283,7 @@ void optimize_scheduler(mdp& m, const std::vector<std::string>& ordered_variable
 						best_seen_value.numerator().str() + "/" + best_seen_value.denominator().str() + "   to " +
 						accummulated.numerator().str() + "/" + accummulated.denominator().str());
 					*/
-					standard_logger()->trace(std::string("improve decision at   ") + *var + "   ::   " +
+					if constexpr (WRITE_LOG) standard_logger()->trace(std::string("improve decision at   ") + *var + "   ::   " +
 						cont.available_actions_per_state[*var][select_action] + "   -->>   " + cont.available_actions_per_state[*var][action_id]
 						+ ":     " + best_seen_value.denominator().str());
 					select_action = action_id;
@@ -319,21 +320,22 @@ void optimize_scheduler(mdp& m, const std::vector<std::string>& ordered_variable
 			}
 
 			// output optimal schedulers
-			standard_logger()->info("The following memoryless deterministic scheduler(s) is/are optimal:");
+			if constexpr (WRITE_LOG) standard_logger()->info("The following memoryless deterministic scheduler(s) is/are optimal:");
 			for (const auto& decision : s) {
 				std::string schedulers_string;
 				for (auto action_id : decision.second) {
 					schedulers_string += cont.available_actions_per_state[decision.first][action_id] + "   ";
 				}
-				standard_logger()->info(std::string("At state  ") + decision.first + "  :  " + schedulers_string);
+				if constexpr (WRITE_LOG) standard_logger()->info(std::string("At state  ") + decision.first + "  :  " + schedulers_string);
 			}
-			standard_logger()->info("The following expectations per state are optimal:");
-			for (std::size_t i = 0; i < current_solution.size(); ++i) {
-				standard_logger()->info(std::string("At state  ") + ordered_variables[i] + "  :  " + current_solution[i].numerator().str() + "/" + current_solution[i].denominator().str());
-			}
+			if constexpr (WRITE_LOG) standard_logger()->info("The following expectations per state are optimal:");
+			if constexpr (WRITE_LOG)
+				for (std::size_t i = 0; i < current_solution.size(); ++i) {
+					standard_logger()->info(std::string("At state  ") + ordered_variables[i] + "  :  " + current_solution[i].numerator().str() + "/" + current_solution[i].denominator().str());
+				}
 			return;
 		}
-		standard_logger()->info("Found a scheduler improvement. Rerun stepwise improvement.");
+		if constexpr (WRITE_LOG) standard_logger()->info("Found a scheduler improvement. Rerun stepwise improvement.");
 	}
 }
 
@@ -393,6 +395,7 @@ void check_task_okay(const nlohmann::json& merged_json) { // do-check!
 /**
 *	removes unreachable states, throws error if error_on_exists_unreachable_state
 */
+template <bool WRITE_LOG = true>
 void remove_unreachable_states(mdp& m, bool error_on_exists_unreachable_state) { // do-check!
 	std::string& initial_state{ m.initial };
 
@@ -434,6 +437,7 @@ void remove_unreachable_states(mdp& m, bool error_on_exists_unreachable_state) {
 	for (const auto& state : m.states) {
 		if (iter == reachables.cend()) {
 			unreachables.push_back(state);
+			continue;
 		}
 		if (state == *iter) {
 			++iter;
@@ -452,12 +456,12 @@ void remove_unreachable_states(mdp& m, bool error_on_exists_unreachable_state) {
 	if (!unreachables.empty()) {
 		for (auto& state : unreachables) {
 			if (error_on_exists_unreachable_state) {
-				standard_logger()->error("Found unreachable states:  ");
-				standard_logger()->error(std::string(".....") + state);
+				if constexpr (WRITE_LOG) standard_logger()->error("Found unreachable states:  ");
+				if constexpr (WRITE_LOG) standard_logger()->error(std::string(".....") + state);
 			}
 			else {
-				standard_logger()->warn("Found unreachable states:  ");
-				standard_logger()->warn(std::string(".....") + state);
+				if constexpr (WRITE_LOG) standard_logger()->warn("Found unreachable states:  ");
+				if constexpr (WRITE_LOG) standard_logger()->warn(std::string(".....") + state);
 			}
 		}
 		if (error_on_exists_unreachable_state)
@@ -473,6 +477,7 @@ void remove_unreachable_states(mdp& m, bool error_on_exists_unreachable_state) {
 	}
 }
 
+template <bool WRITE_LOG = true>
 bool check_reaching_target_is_guaranteed(mdp& m) { // do-check!
 	std::map<std::string, bool> prob_to_target_is_positive;
 	std::map<std::string, bool> is_target;
@@ -510,7 +515,7 @@ bool check_reaching_target_is_guaranteed(mdp& m) { // do-check!
 	bool found_error{ false };
 	for (const auto& pair : prob_to_target_is_positive) {
 		if (pair.second == false) {
-			standard_logger()->error(std::string("Found a state from which you cannot reach a target:   ") + pair.first);
+			if constexpr (WRITE_LOG) standard_logger()->error(std::string("Found a state from which you cannot reach a target:   ") + pair.first);
 			found_error = true;
 		}
 	}
@@ -614,13 +619,15 @@ auto count_combinations(const big_int_type& decision_layers, const big_int_type&
 }
 
 
-std::pair<mdp, bool> generate_mdp(std::size_t count_states, std::size_t count_target_states, std::size_t count_actions, rational_type probability_unit, big_int_type& resolve_nondeterminism, big_int_type min_reward, big_int_type past_max_reward) {
+std::pair<mdp, bool> generate_mdp(std::size_t count_states, std::size_t count_target_states, std::size_t count_actions, const rational_type& probability_unit, big_int_type& resolve_nondeterminism, big_int_type min_reward, big_int_type past_max_reward) {
 	mdp m;
 	// we only need two actions without loss of generality
 
 	if (!(count_target_states < count_states) || !(count_target_states > 0) || (count_states < 1)) {
-		throw 0; // ### change error
+		throw std::runtime_error("count states"); // ### change error
 	}
+
+	//standard_logger()->debug(resolve_nondeterminism.str());
 
 	const auto reziproke_prob = rational_type(1) / probability_unit;
 	if ((reziproke_prob).denominator() != 1) {
@@ -640,7 +647,7 @@ std::pair<mdp, bool> generate_mdp(std::size_t count_states, std::size_t count_ta
 	}
 
 	for (std::size_t i = 0; i < count_actions; ++i) {
-		m.states.insert(get_action_name(i));
+		m.actions.insert(get_action_name(i));
 	}
 
 	std::size_t first_non_target_state = 0;
@@ -1294,25 +1301,6 @@ int run_starting_from_merged_json(const nlohmann::json& merged_json) { // do-che
 
 		rational_type cut_level = weight_threshold;
 
-#if false
-		std::tuple<
-			rational_type, // cut level
-			std::tuple<
-			rational_type, // hVar optimal value
-			std::vector <rational_type>, // mu of optimal schedulers
-			std::vector<scheduler_container> // optimal schedulers
-			>,
-			std::vector<
-			std::pair<
-			rational_type, // stabilisation distance
-			std::map<
-			std::string, // original state name
-			std::size_t // index of chosen action
-			> // cut end scheduler
-			>
-			> //
-		> optimal_solutions;
-#endif
 
 		// use increasing cut_level until n
 
@@ -1375,11 +1363,11 @@ int run_starting_from_merged_json(const nlohmann::json& merged_json) { // do-che
 			std::map<std::string, std::string> reward_based_scheduler_map;
 			for (auto iter = augmented_state_to_pair.begin(); iter != augmented_state_to_pair.end(); ++iter) {
 
-					auto& all_actions_at_this_state = optimal_scheds_vector[i].available_actions_per_state[iter->first];
+				auto& all_actions_at_this_state = optimal_scheds_vector[i].available_actions_per_state[iter->first];
 
-					reward_based_scheduler_map[iter->first] = all_actions_at_this_state.empty() // trap state
-						? "--NONE--" :
-						all_actions_at_this_state[optimal_scheds_vector[i].sched[iter->first]]; // action name
+				reward_based_scheduler_map[iter->first] = all_actions_at_this_state.empty() // trap state
+					? "--NONE--" :
+					all_actions_at_this_state[optimal_scheds_vector[i].sched[iter->first]]; // action name
 			}
 
 			standard_logger()->info("The following scheduler decisions are optimal for the approximation scenario:");
@@ -1432,6 +1420,182 @@ int run_starting_from_merged_json(const nlohmann::json& merged_json) { // do-che
 		goto before_return;
 	}
 
+
+	if (calc_json.at(keywords::mode).get<std::string>() == keywords::value::generatePerformance.data()) {
+		standard_logger()->info("Start generating performance data");
+		rational_type t;
+		rational_type r;
+		try {
+			json_task_error::check("mode_generatePerformance_has_t", calc_json.contains("t"));
+			json_task_error::check("mode_generatePerformance_has_t_string", calc_json.at("t").is_string());
+			t = string_to_rational_type(calc_json.at("t").get<std::string>());
+			json_task_error::check("mode_generatePerformance_has_r", calc_json.contains("r"));
+			json_task_error::check("mode_generatePerformance_has_r_string", calc_json.at("r").is_string());
+			r = string_to_rational_type(calc_json.at("r").get<std::string>());
+		}
+		catch (const json_task_error& e) {
+			standard_logger()->error(e.what());
+			const std::size_t error_code{ 8 };
+			standard_logger()->error(application_errors::application_error_messages[error_code].data());
+			return error_code;
+		}
+		catch (rational_parse_error& e) {
+			standard_logger()->error(e.what());
+			const std::size_t error_code{ 11 };
+			standard_logger()->error(application_errors::application_error_messages[error_code].data());
+			return error_code;
+		}
+		const auto c{ crinkle(r, t) };
+
+
+		std::size_t max_states{ 0 };
+		std::size_t count_actions{ 0 };
+		rational_type probability_unit{ 0 };
+
+		try {
+			json_task_error::check("mode_generatePerformance_has_max_states", calc_json.contains("max_states"));
+			json_task_error::check("mode_generatePerformance_has_max_states_string", calc_json.at("max_states").is_string());
+			max_states = std::stoull(calc_json.at("max_states").get<std::string>());
+
+			json_task_error::check("mode_generatePerformance_has_count_actions", calc_json.contains("count_actions"));
+			json_task_error::check("mode_generatePerformance_has_count_actions_string", calc_json.at("count_actions").is_string());
+			count_actions = std::stoull(calc_json.at("count_actions").get<std::string>());
+
+			json_task_error::check("mode_generatePerformance_has_probability_unit", calc_json.contains("probability_unit"));
+			json_task_error::check("mode_generatePerformance_has_probability_unit_string", calc_json.at("probability_unit").is_string());
+			probability_unit = string_to_rational_type(calc_json.at("probability_unit").get<std::string>());
+		}
+		catch (const json_task_error& e) {
+			standard_logger()->error(e.what());
+			const std::size_t error_code{ 8 };
+			standard_logger()->error(application_errors::application_error_messages[error_code].data());
+			return error_code;
+		}
+		catch (rational_parse_error& e) {
+			standard_logger()->error(e.what());
+			const std::size_t error_code{ 11 };
+			standard_logger()->error(application_errors::application_error_messages[error_code].data());
+			return error_code;
+		}
+
+		standard_logger()->debug(probability_unit.numerator().str());
+		standard_logger()->debug(probability_unit.denominator().str());
+
+		// ready with reading input
+
+		std::vector<std::vector<std::chrono::nanoseconds>> mdp_size_to_all_time_durations;
+
+		for (std::size_t count_states = 2; count_states <= max_states; ++count_states) {
+			big_int_type increment{ 1 };
+			bool next_mdp = true;
+			big_int_type ndet_resolver{ 0 };
+			big_int_type min_reward{ -1 };
+			big_int_type past_max_reward{ 2 };
+
+			while (next_mdp) {
+				auto resolver = ndet_resolver; // copy
+				std::pair<mdp, bool> mdp_and_finished = generate_mdp(count_states, 1, count_actions, probability_unit, resolver, min_reward, past_max_reward);
+
+				next_mdp = !mdp_and_finished.second;
+
+				ndet_resolver += increment; // +1
+				increment = increment + (increment / 2);
+				increment += 3;
+
+				if (!next_mdp) {
+					continue;
+				}
+
+				nlohmann::json json_mdp = mdp_to_json(mdp_and_finished.first);
+
+				//standard_logger()->debug(json_mdp.dump(3));
+
+				mdp recreated_mdp;
+				/*
+					BUILD UP MDP
+				*/
+				try {
+					check_valid_mdp_and_load_mdp_from_json(json_mdp, recreated_mdp);
+				}
+				catch (mdp_sanity&) { //invalid mdp skipped
+					continue;
+				}
+
+				// check:no unreachable states / remove unreachable states and their transitions / rewards....
+				// also removes 0-probability transitions!!!
+				try {
+					remove_unreachable_states<false>(recreated_mdp, true);
+				}
+				catch (const found_unreachable_state&) {
+					continue;
+				}
+				if (!check_reaching_target_is_guaranteed<false>(recreated_mdp)) {
+					continue;
+				}
+
+
+				std::map<std::string, rational_type> generate_delta_max;
+
+				std::chrono::steady_clock::time_point time_stamp_before = std::chrono::steady_clock::now();
+				try {
+					generate_delta_max = calc_delta_max_state_wise<false>(recreated_mdp, true, true);
+				}
+				catch (const found_negative_loop&) {
+					continue;
+				}
+				catch (const calc_delta_max_error&) {
+					continue;
+				}
+				// check mdp valid
+
+				//calculate the crinkle here
+
+
+
+				mdp n;
+				std::vector<std::string> ordered_variables;
+
+				n = unfold<decltype(c), false>(m, c, generate_delta_max, ordered_variables);
+
+				//standard_logger()->trace(mdp_to_json(n).dump(3));
+
+				optimize_scheduler<false>(n, ordered_variables);
+				std::chrono::steady_clock::time_point time_stamp_after = std::chrono::steady_clock::now();
+
+				if (next_mdp) { // if not finished
+					while (!(mdp_size_to_all_time_durations.size() > count_states))
+						mdp_size_to_all_time_durations.emplace_back();
+					auto time_delta = time_stamp_after - time_stamp_before;
+					mdp_size_to_all_time_durations[count_states].push_back(time_delta);
+					// add measure data
+				}
+			}
+
+			standard_logger()->info(std::string("For #states: ") + std::to_string(count_states) + "     tried potential MDPs:   " + ndet_resolver.convert_to<std::string>());
+			increment = ndet_resolver;
+		}
+
+
+		for (std::size_t num_states = 2; num_states < mdp_size_to_all_time_durations.size(); ++num_states) {
+			const auto& all_measures{ mdp_size_to_all_time_durations[num_states] };
+			if (all_measures.empty())
+				continue;
+			std::chrono::nanoseconds average_case{ 0 };
+			std::chrono::nanoseconds worst_case{ 0 };
+			for (const auto& measure : all_measures) {
+				if (measure > worst_case)
+					worst_case = measure;
+
+				average_case += measure;
+			}
+			average_case /= all_measures.size();
+
+			standard_logger()->info(std::string("size= ") + std::to_string(num_states) + "   average= " + std::to_string(average_case.count()) + "   worst= " + std::to_string(worst_case.count()));
+		}
+		goto before_return;
+	}
+
+
 	// unknown task calc mode -> throw error
 	{
 		const std::size_t error_code{ 12 };
@@ -1439,7 +1603,6 @@ int run_starting_from_merged_json(const nlohmann::json& merged_json) { // do-che
 		standard_logger()->error(std::string("json: task.calc.mode   ==   \"") + calc_json.at(keywords::mode).get<std::string>() + "\"");
 		return error_code;
 	}
-
 	// create unfold-mdp
 	//#### will break if in m state names use underscore
 
@@ -1516,8 +1679,9 @@ int main(int argc, char* argv[])// ready
 			const auto b1_path = std::string("../../res/B-1.json");
 			const auto task_classic = std::string("../../res/task_classic.json");
 			const auto task_crinkle_t3_r10 = std::string("../../res/task_crinkle_t3_r10.json");
+			const auto performance = std::string("../../res/performance_run.json");
 
-			auto all_jsons = std::vector<std::string>{ b1_path, task_crinkle_t3_r10 };
+			auto all_jsons = std::vector<std::string>{ performance }; // { b1_path, task_crinkle_t3_r10 };
 			return load_jsons_and_run(all_jsons);
 		}
 		else {

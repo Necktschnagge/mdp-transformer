@@ -40,7 +40,7 @@ void check_valid_mdp_and_load_mdp_from_json(const nlohmann::json& input, mdp& fi
 
 //#### mdp sanity checks should stop further calculations!
 
-template<class _Modification>
+template<class _Modification, bool WRITE_LOG = true>
 inline mdp unfold(const mdp& m, const _Modification& func, const std::map<std::string, rational_type>& delta_max, std::vector<std::string>& ordered_variables) { // do-check!
 
 	std::list<further_expand_record> further_expand;
@@ -105,7 +105,7 @@ inline mdp unfold(const mdp& m, const _Modification& func, const std::map<std::s
 
 				std::string new_next_state_name = get_new_state_name(next_state_name, m_next_rew);
 				// check if we passed threshold + delta_max....
-				standard_logger()->trace(std::string("check bounds : ") + func.threshold().numerator().str() + " .... " + delta_max.at(next_state_name).numerator().str());
+				if constexpr (WRITE_LOG) standard_logger()->trace(std::string("check bounds : ") + func.threshold().numerator().str() + " .... " + delta_max.at(next_state_name).numerator().str());
 				if (m_next_rew >= func.threshold() + delta_max.at(next_state_name)) { // or current state is alredy in cut mode (se how it is solved in stupid_unfold)
 					new_next_state_name = next_state_name;
 				}
@@ -406,6 +406,8 @@ return 0 on ignored,
 max delta otherwise
 -m.negative_loop_delta_threshold() if there is a negative loop
 */
+
+template <bool WRITE_LOG = true>
 inline std::map<std::string, rational_type> calc_delta_max_state_wise(const mdp& m, bool ignore_target_states, bool error_on_negative_loop) { // do-check!
 	// should only check for negative circles
 
@@ -438,7 +440,7 @@ inline std::map<std::string, rational_type> calc_delta_max_state_wise(const mdp&
 								throw found_negative_loop("Found negative loop while determining delta max.");
 							}
 						}
-						standard_logger()->trace(std::string("UPDATE delta_m for  >" + state + "<  :" + update.numerator().str() + "/" + update.denominator().str()));
+						if constexpr (WRITE_LOG) standard_logger()->trace(std::string("UPDATE delta_m for  >" + state + "<  :" + update.numerator().str() + "/" + update.denominator().str()));
 					}
 				}
 			}
@@ -451,5 +453,5 @@ inline std::map<std::string, rational_type> calc_delta_max_state_wise(const mdp&
 	for (auto& pair : result) // convert into positive values!
 		pair.second *= rational_type(-1);
 
-	return result;
+		return result;
 }

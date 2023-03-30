@@ -15,6 +15,7 @@ namespace keywords {
 	namespace value {
 		static constexpr std::string_view classic{ "classic" };
 		static constexpr std::string_view crinkle{ "crinkle" };
+		static constexpr std::string_view generatePerformance{ "generatePerformance" };
 		static constexpr std::string_view quadratic{ "quadratic" };
 		static constexpr std::string_view hVar_approach_percentage_cut{ "hVar-percentage-cut" };
 		static constexpr std::string_view hVar_approach{ "hVar-approach" };

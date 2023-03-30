@@ -28,7 +28,7 @@ void init_logger(){
 
 	auto standard_logger = std::make_shared<spdlog::logger>(STANDARD_LOGGER_NAME, sink_std_cout);
 
-	standard_logger->set_level(spdlog::level::trace);
+	standard_logger->set_level(spdlog::level::debug);
 
 	spdlog::register_logger(standard_logger);
 }
