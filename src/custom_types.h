@@ -7,6 +7,7 @@
 #include <set>
 #include <map>
 
+using big_int_type = boost::multiprecision::cpp_int;
 using rational_type = boost::rational<boost::multiprecision::cpp_int>;
 
 
@@ -70,6 +71,7 @@ public:
 	std::set<std::string> targets;
 
 
+	/* minimal reward value in the whole mdp */
 	rational_type min_reward() const {
 		std::vector<rational_type> values;
 		for (const auto& state_paired_rewards : rewards) {
@@ -86,17 +88,38 @@ public:
 		}
 		return min;
 	}
+
+	/*
+		this is less than or equal to the minimal possible accumulated weight on any finite path, if we do not have negative cycles
+		if you found a path with less than this value, you found a negative cycle
+		
+		the returned value is 0 in case there is no negative rewarded finite path.
+		otherwise the returned value is negative.
+	*/
+	rational_type negative_loop_delta_threshold() const {
+		if (min_reward() >= 0) {
+			return rational_type(0);
+		}
+		return (rational_type(states.size()) - 1) * min_reward(); // in case min_reward() is negative
+		/*
+			maximal loss of reward is
+					min_reward per transition
+						X
+					maximal length of this path (no cycle) -> #states - 1
+		*/
+	}
+
 };
 
 class further_expand_record {
 public:
-	std::string new_state_name;
-	std::string old_state_name;
+	std::string augmented_state_name;
+	std::string original_state_name;
 	rational_type accumulated_reward;
 
-	further_expand_record(const std::string& old_state_name, rational_type accumulated_reward, const std::string& new_state_name) :
-		new_state_name(new_state_name),
-		old_state_name(old_state_name),
+	further_expand_record(const std::string& original_state_name, rational_type accumulated_reward, const std::string& augmented_state_name) :
+		augmented_state_name(augmented_state_name),
+		original_state_name(original_state_name),
 		accumulated_reward(accumulated_reward)
 	{}
 

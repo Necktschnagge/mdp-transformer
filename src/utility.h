@@ -83,16 +83,13 @@ public:
 	}
 };
 
-inline nlohmann::json merge_json_objects(const std::vector<nlohmann::json>& jsons) {
-
+inline nlohmann::json merge_json_objects(const std::vector<nlohmann::json>& jsons) { // ready
 	nlohmann::json merged = nlohmann::json::object();
 
 	for (const auto& j : jsons) {
 		json_logic_error::check("Found a json file which is not a json object", j.is_object());
 		for (auto iter = j.cbegin(); iter != j.cend(); ++iter) {
-			
 			json_logic_error::check(std::string("Found a json key twice:   ") + iter.key(), !merged.contains(iter.key()));
-			
 			merged[iter.key()] = iter.value();
 		}
 	}

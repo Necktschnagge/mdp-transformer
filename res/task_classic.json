@@ -7,9 +7,7 @@
       "ignore-negative-cycles-on-target-states": true
     },
     "calc": {
-      "mode": "crinkle",
-      "t": "12",
-      "r": "3"
+      "mode": "classic"
     }
   }
 }

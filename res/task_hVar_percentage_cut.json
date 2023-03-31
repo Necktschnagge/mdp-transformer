@@ -7,9 +7,9 @@
       "ignore-negative-cycles-on-target-states": true
     },
     "calc": {
-      "mode": "crinkle",
-      "t": "12",
-      "r": "3"
+      "mode": "hVar-percentage-cut",
+      "prob": "80/100",
+      "lambda": "7/10"
     }
   }
 }

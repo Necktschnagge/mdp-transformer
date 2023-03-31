@@ -7,9 +7,10 @@
       "ignore-negative-cycles-on-target-states": true
     },
     "calc": {
-      "mode": "crinkle",
-      "t": "12",
-      "r": "3"
+      "mode": "hVar-approach",
+      "n": "100",
+      "seconds": "100",
+      "lambda": "7/100"
     }
   }
 }

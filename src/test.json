@@ -38,22 +38,17 @@
     },
     "s2": {
       "a": {
-        "t": "4/5",
-		"s2": "1/5"
+        "t": "1"
       },
       "b": {
         "s3": "1"
       }
     },
     "s3": {
-      "a": {
+      "unique": {
         "s3": "3/4",
         "t": "1/4"
-      },
-	  "b": {
-        "s3": "3/50",
-        "t": "47/50"		  
-	  }
+      }
     },
     "s4": {
       "unique": {
@@ -64,7 +59,7 @@
   "initial": "init",
   "rewards": {
     "init": {
-      "unique": "-10"
+      "unique": "0"
     },
     "s0": {
       "a": "1",
@@ -74,12 +69,11 @@
       "unique": "10"
     },
     "s2": {
-      "a": "9",
+      "a": "10",
       "b": "-1"
     },
     "s3": {
-      "a": "3",
-	  "b": "11"
+      "unique": "3"
     },
     "s4": {
       "unique": "18"
@@ -87,5 +81,21 @@
   },
   "targets": [
     "t"
-  ]
+  ],
+
+
+  "task": {
+    "checks": {
+      "no-unreachable-states": true,
+      "reaching-target-with-probability-1": true,
+      "no-negative-cycles": true,
+      "ignore-negative-cycles-on-target-states": true
+    },
+    "calc": {
+      "mode": "hVar-approach",
+      "n": "100",
+      "seconds": "100",
+      "lambda": "7/100"
+    }
+  }
 }
