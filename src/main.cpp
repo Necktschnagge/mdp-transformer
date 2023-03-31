@@ -1307,8 +1307,6 @@ int run_starting_from_merged_json(const nlohmann::json& merged_json) { // do-che
 
 		standard_logger()->trace(std::string("run on cut_level:   ") + cut_level.numerator().str() + "/" + cut_level.denominator().str());
 
-		auto timestamp_before_calculting = std::chrono::steady_clock::now();
-
 		// to be unfolded without any changed step rewards
 		mdp stupid_unfolded_mdp;
 
@@ -1416,7 +1414,6 @@ int run_starting_from_merged_json(const nlohmann::json& merged_json) { // do-che
 		standard_logger()->info(message3);
 
 		standard_logger()->info("-------------------------------------------------------------------------------------");
-		auto timestamp_after_calculting = std::chrono::steady_clock::now();
 
 		goto before_return;
 	}
