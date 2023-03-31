@@ -10,6 +10,7 @@
 #include <nlohmann/json.hpp>
 
 #include <future>
+#include <random>
 
 
 std::set<std::string> calc_reachable_states(const mdp& m) {
@@ -1485,6 +1486,7 @@ int run_starting_from_merged_json(const nlohmann::json& merged_json) { // do-che
 
 		std::vector<std::vector<std::chrono::nanoseconds>> mdp_size_to_all_time_durations;
 
+		std::random_device rand;
 		for (std::size_t count_states = 2; count_states <= max_states; ++count_states) {
 			big_int_type increment{ 1 };
 			bool next_mdp = true;
@@ -1493,14 +1495,21 @@ int run_starting_from_merged_json(const nlohmann::json& merged_json) { // do-che
 			big_int_type past_max_reward{ 2 };
 
 			while (next_mdp) {
+
+				// Choose a random mean between 1 and 6
+				std::default_random_engine e1(rand());
+				std::uniform_int_distribution<int> uniform_dist(0, 9);
+				int increment_random = uniform_dist(e1);
+
 				auto resolver = ndet_resolver; // copy
 				std::pair<mdp, bool> mdp_and_finished = generate_mdp(count_states, 1, count_actions, probability_unit, resolver, min_reward, past_max_reward);
 
-				next_mdp = !mdp_and_finished.second;
+				//next_mdp = !mdp_and_finished.second;
 
-				ndet_resolver += increment; // +1
-				increment = increment + (increment / 2);
-				increment += 3;
+				ndet_resolver *= 10; // +1
+				ndet_resolver += increment_random; // +1
+				//increment = increment + (increment / 2);
+				//increment += 3;
 
 				if (!next_mdp) {
 					continue;
@@ -1568,10 +1577,14 @@ int run_starting_from_merged_json(const nlohmann::json& merged_json) { // do-che
 					auto time_delta = time_stamp_after - time_stamp_before;
 					mdp_size_to_all_time_durations[count_states].push_back(time_delta);
 					// add measure data
+					if (mdp_size_to_all_time_durations[count_states].size() > 20) {
+						next_mdp = false;
+					}
 				}
 			}
 
-			standard_logger()->info(std::string("For #states: ") + std::to_string(count_states) + "     tried potential MDPs:   " + ndet_resolver.convert_to<std::string>());
+			//standard_logger()->info(std::string("For #states: ") + std::to_string(count_states) + "     tried potential MDPs:   " + ndet_resolver.convert_to<std::string>());
+			standard_logger()->info(std::string("Finished for #states: ") + std::to_string(count_states));
 			increment = ndet_resolver;
 		}
 
@@ -1590,7 +1603,7 @@ int run_starting_from_merged_json(const nlohmann::json& merged_json) { // do-che
 			}
 			average_case /= all_measures.size();
 
-			standard_logger()->info(std::string("size= ") + std::to_string(num_states) + "   average= " + std::to_string(average_case.count()) + "   worst= " + std::to_string(worst_case.count()));
+			standard_logger()->info(std::string("size= ") + std::to_string(num_states) + "   average= " + std::to_string(average_case.count()) + "   worst= " + std::to_string(worst_case.count()) + "   count= " + std::to_string(all_measures.size()));
 		}
 		goto before_return;
 	}
