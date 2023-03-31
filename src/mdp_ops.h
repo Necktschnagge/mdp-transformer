@@ -453,5 +453,5 @@ inline std::map<std::string, rational_type> calc_delta_max_state_wise(const mdp&
 	for (auto& pair : result) // convert into positive values!
 		pair.second *= rational_type(-1);
 
-		return result;
+	return result;
 }
